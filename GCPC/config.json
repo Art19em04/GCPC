@@ -1,0 +1,58 @@
+{
+  "video": {
+    "fps_min": 60,
+    "roi": [
+      0.15,
+      0.25,
+      0.7,
+      0.6
+    ],
+    "camera_index": 1,
+    "width": 1280,
+    "height": 720,
+    "exposure_auto": true,
+    "camera_backend": "msmf"
+  },
+  "gesture": {
+    "conf_min": 0.75,
+    "min_duration_ms": 60,
+    "max_duration_ms": 220,
+    "cooldown_ms": 250
+  },
+  "clutch": {
+    "type": "pinch",
+    "window_ms": 2500,
+    "pinch_open": 0.3,
+    "pinch_close": 0.22,
+    "hold_ms": 80
+  },
+  "mapping": {
+    "swipe_up": [
+      "CTRL",
+      "C"
+    ],
+    "swipe_down": [
+      "CTRL",
+      "V"
+    ],
+    "tap_forward": [
+      "CTRL",
+      "X"
+    ],
+    "tap_back": [
+      "CTRL",
+      "Z"
+    ]
+  },
+  "telemetry": {
+    "log_level": "info",
+    "dir": "logs",
+    "file_prefix": "session"
+  },
+  "models": {
+    "hand_landmarker": "models/hand_landmarker.task"
+  },
+  "hud": {
+    "enabled": true
+  }
+}
