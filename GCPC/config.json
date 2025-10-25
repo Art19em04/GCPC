@@ -11,7 +11,7 @@
     "height": 360,
     "fps_min": 60,
     "exposure_auto": true,
-    "camera_backend": "msmf"
+    "camera_backend": "dshow"
   },
   "gesture": {
     "conf_min": 0.5,

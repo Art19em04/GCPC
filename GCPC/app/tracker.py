@@ -43,11 +43,15 @@ class HandTracker:
         self._cnt_hi = 0
         self._cnt_lo = 0
 
+        # EP selection: prefer CUDA (NVIDIA), else DirectML. No CPU fallback.
         providers = ort.get_available_providers()
-        if "DmlExecutionProvider" not in providers:
-            raise RuntimeError("DirectML execution provider is required")
-        self.providers = ["DmlExecutionProvider"]
-        print("[ORT] available providers:", providers, flush=True)
+        if "CUDAExecutionProvider" in providers:
+            self.providers = ["CUDAExecutionProvider"]
+        elif "DmlExecutionProvider" in providers:
+            self.providers = ["DmlExecutionProvider"]
+        else:
+            raise RuntimeError("No GPU EP available: need CUDAExecutionProvider or DmlExecutionProvider")
+        print("[ORT] selected providers:", self.providers, "available:", providers, flush=True)
 
         session_opts = ort.SessionOptions()
         session_opts.log_severity_level = 3
@@ -187,26 +191,29 @@ class HandTracker:
                 self.lost_frames += 1
                 self.last_conf = 0.0
 
-        conf = float(self.last_conf)
-        if conf >= self.pres_high:
-            self._cnt_hi += 1
-            self._cnt_lo = max(0, self._cnt_lo - 1)
-        elif conf <= self.pres_low:
-            self._cnt_lo += 1
-            self._cnt_hi = max(0, self._cnt_hi - 1)
+        # Presence gating only when detector exists; otherwise allow ROI path.
+        if self.det_sess is not None:
+            conf = float(self.last_conf)
+            if conf >= self.pres_high:
+                self._cnt_hi += 1
+                self._cnt_lo = max(0, self._cnt_lo - 1)
+            elif conf <= self.pres_low:
+                self._cnt_lo += 1
+                self._cnt_hi = max(0, self._cnt_hi - 1)
 
-        if not self._present and self._cnt_hi >= self.k_enter:
-            self._present = True
-            self._cnt_lo = 0
-        elif self._present and self._cnt_lo >= self.k_exit:
-            self._present = False
-            self._cnt_hi = 0
+            if not self._present and self._cnt_hi >= self.k_enter:
+                self._present = True
+                self._cnt_lo = 0
+            elif self._present and self._cnt_lo >= self.k_exit:
+                self._present = False
+                self._cnt_hi = 0
 
-        if not self._present:
-            if self.lost_frames > self.lost_grace:
-                self.last_box_xyxy = None
-            return None
+            if not self._present:
+                if self.lost_frames > self.lost_grace:
+                    self.last_box_xyxy = None
+                return None
 
+        # Crop from detector bbox or ROI
         if self.det_sess is not None:
             if (not self._present and self.lost_frames > self.lost_grace) or (self.last_box_xyxy is None):
                 return None
@@ -216,11 +223,12 @@ class HandTracker:
         else:
             x0, y0, x1, y1 = self._norm2abs_roi(h, w, self.roi_norm)
             crop = frame_bgr[y0:y1, x0:x1]
-            det_conf = 1e-3
+            det_conf = 1.0  # ensure main.py doesn't drop it
 
         inp = self._prep(crop, crop.shape[0], crop.shape[1], self.lmk_nchw, self.lmk_h, self.lmk_w)
         out = self.lmk_sess.run(None, {self.lmk_in: inp})
         pts = self._post_landmarks(out)
+
         span_x = float(pts[:, 0].max() - pts[:, 0].min())
         span_y = float(pts[:, 1].max() - pts[:, 1].min())
         if span_x < 0.1 or span_y < 0.1:
@@ -232,4 +240,5 @@ class HandTracker:
             if self.lost_frames > self.lost_grace:
                 self.last_box_xyxy = None
             return None
+
         return HandResult(handedness="Right", landmarks=pts, rect_xyxy=(x0, y0, x1, y1), score=det_conf)

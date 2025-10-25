@@ -7,7 +7,11 @@ class Video:
     def __init__(self, cfg):
         video_cfg = cfg["video"]
         idx = video_cfg.get("camera_index", 0)
-        backend = cv2.CAP_DSHOW if platform.system().lower().startswith("win") else 0
+        backend_name = str(video_cfg.get("camera_backend", "dshow")).lower()
+        if platform.system().lower().startswith("win"):
+            backend = cv2.CAP_MSMF if backend_name == "msmf" else cv2.CAP_DSHOW
+        else:
+            backend = 0
         self.cap = cv2.VideoCapture(idx, backend)
         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, video_cfg.get("width", 640))
