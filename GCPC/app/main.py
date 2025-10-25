@@ -4,15 +4,15 @@ import time
 
 import cv2
 
-from .cv_io import Video
-from .tracker import HandTracker
-from .clutch import PinchClutch, ClutchState
-from .microgestures import MicroGestureDetector, G
-from .os_events import send_keys
-from .telemetry import Telemetry
-from .hud import draw_hud
-from .config import load_config
-from .utils.timing import now_ns, Tick
+from cv_io import Video
+from tracker import HandTracker
+from clutch import PinchClutch, ClutchState
+from microgestures import MicroGestureDetector, G
+from os_events import send_keys
+from telemetry import Telemetry
+from hud import draw_hud
+from config import load_config
+from utils.timing import now_ns, Tick
 
 os.environ["PYTHONUNBUFFERED"] = "1"
 if hasattr(sys.stdout, "reconfigure"):
