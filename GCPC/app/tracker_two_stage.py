@@ -60,6 +60,15 @@ def _unletterbox_xyxy(xyxy, meta):
     y1 = (y1 - py) / max(1e-8, s); y2 = (y2 - py) / max(1e-8, s)
     return [float(np.clip(x1,0,iw)), float(np.clip(y1,0,ih)), float(np.clip(x2,0,iw)), float(np.clip(y2,0,ih))]
 
+
+def _unletterbox_point(pt, meta):
+    x, y = pt
+    iw, ih = meta["in_w"], meta["in_h"]
+    s = meta["scale"]; px, py = meta["pad_x"], meta["pad_y"]
+    ox = (x - px) / max(1e-8, s)
+    oy = (y - py) / max(1e-8, s)
+    return float(np.clip(ox, 0.0, iw)), float(np.clip(oy, 0.0, ih))
+
 def _nms(boxes, scores, iou_th=0.45, topk=100):
     if len(boxes)==0: return []
     boxes = np.array(boxes, dtype=np.float32)
@@ -121,6 +130,7 @@ class _PalmDetectorDecoder:
         self.h_scale = float(self.in_h)
         self.score_clip = 100.0
         self._warned_anchor_mismatch = False
+        self._max_keypoints = 7
 
     def _generate_anchors(self):
         # MediaPipe palm detector anchor spec
@@ -215,22 +225,25 @@ class _PalmDetectorDecoder:
             probs = _softmax(np.clip(raw_scores, -self.score_clip, self.score_clip))
             scores = probs[:, -1]
 
-        boxes = self._decode_with_anchors(raw_boxes, scores, anchors)
-        if boxes:
-            return boxes
+        detections = self._decode_with_anchors(raw_boxes, scores, anchors)
+        if detections:
+            return detections
 
         # fallback heuristics when anchor metadata mismatches the export
         if not self._warned_anchor_mismatch:
             print("[DET] Не удалось сопоставить anchors с выходами модели — включаем эвристики декодирования")
             self._warned_anchor_mismatch = True
-        boxes = self._decode_direct_xywh(raw_boxes, scores)
-        if boxes:
-            return boxes
+        detections = self._decode_direct_xywh(raw_boxes, scores)
+        if detections:
+            return detections
 
         return self._decode_direct_xyxy(raw_boxes, scores)
 
     def _decode_with_anchors(self, raw_boxes, scores, anchors):
-        boxes = []
+        detections = []
+        num_vals = raw_boxes.shape[1]
+        num_keypoints = max(0, (num_vals - 4) // 2)
+        kp_to_use = min(self._max_keypoints, num_keypoints)
         for i, rb in enumerate(raw_boxes):
             sc = float(scores[i])
             if sc <= 0:
@@ -240,6 +253,7 @@ class _PalmDetectorDecoder:
             y_center = rb[1] / self.y_scale * anchor[3] + anchor[1]
             w = math.exp(rb[2] / self.w_scale) * anchor[2]
             h = math.exp(rb[3] / self.h_scale) * anchor[3]
+
             x1 = (x_center - 0.5 * w) * self.in_w
             y1 = (y_center - 0.5 * h) * self.in_h
             x2 = (x_center + 0.5 * w) * self.in_w
@@ -252,11 +266,51 @@ class _PalmDetectorDecoder:
             y2 = float(np.clip(y2, 0.0, self.in_h))
             if x2 <= x1 or y2 <= y1:
                 continue
-            boxes.append((x1, y1, x2, y2, sc))
-        return boxes
+
+            keypoints = []
+            for kp_idx in range(kp_to_use):
+                base = 4 + kp_idx * 2
+                if base + 1 >= num_vals:
+                    break
+                kx = rb[base] / self.x_scale * anchor[2] + anchor[0]
+                ky = rb[base + 1] / self.y_scale * anchor[3] + anchor[1]
+                keypoints.append((float(kx * self.in_w), float(ky * self.in_h)))
+
+            xc = float(x_center * self.in_w)
+            yc = float(y_center * self.in_h)
+            w_px = float(w * self.in_w)
+            h_px = float(h * self.in_h)
+
+            rotation = 0.0
+            if len(keypoints) >= 2:
+                ref = keypoints[2] if len(keypoints) > 2 else keypoints[1]
+                vec_x = ref[0] - keypoints[0][0]
+                vec_y = ref[1] - keypoints[0][1]
+                rotation = 0.5 * math.pi - math.atan2(vec_y, vec_x)
+
+            shift_x = 0.0
+            shift_y = -0.5
+            roi_center_x = xc + shift_x * w_px
+            roi_center_y = yc + shift_y * h_px
+            roi_size = max(w_px, h_px) * 2.6
+            roi_size = max(roi_size, 1.0)
+
+            detections.append(
+                {
+                    "xyxy": (x1, y1, x2, y2),
+                    "score": sc,
+                    "roi": {
+                        "center": (roi_center_x, roi_center_y),
+                        "size": roi_size,
+                        "rotation": float(rotation),
+                    },
+                    "keypoints": keypoints,
+                }
+            )
+        return detections
 
     def _decode_direct_xywh(self, raw_boxes, scores):
-        boxes = []
+        detections = []
         for rb, sc in zip(raw_boxes, scores):
             sc = float(sc)
             if sc <= 0:
@@ -284,11 +338,11 @@ class _PalmDetectorDecoder:
             y2 = float(np.clip(y2, 0.0, self.in_h))
             if x2 <= x1 or y2 <= y1:
                 continue
-            boxes.append((x1, y1, x2, y2, sc))
-        return boxes
+            detections.append({"xyxy": (x1, y1, x2, y2), "score": sc})
+        return detections
 
     def _decode_direct_xyxy(self, raw_boxes, scores):
-        boxes = []
+        detections = []
         for rb, sc in zip(raw_boxes, scores):
             sc = float(sc)
             if sc <= 0:
@@ -308,8 +362,8 @@ class _PalmDetectorDecoder:
             y2 = float(np.clip(y2, 0.0, self.in_h))
             if x2 <= x1 or y2 <= y1:
                 continue
-            boxes.append((x1, y1, x2, y2, sc))
-        return boxes
+            detections.append({"xyxy": (x1, y1, x2, y2), "score": sc})
+        return detections
 
 
 class DetectorONNX:
@@ -328,32 +382,54 @@ class DetectorONNX:
         x = np.transpose(x,(2,0,1))[None,...]
         out = self.sess.run(self.out_names, {self.inp.name: x})
 
-        boxes, scores = [], []
+        detections = []
         if self.decoder is not None:
-            decoded = self.decoder.decode(out)
-            for (x1, y1, x2, y2, sc) in decoded:
-                boxes.append([float(x1), float(y1), float(x2), float(y2)])
-                scores.append(float(sc))
+            detections = self.decoder.decode(out)
         else:
             y = out[0]
-            if y.ndim==3 and y.shape[-1] >= 6:
-                # assume (1, N, 6+) -> [x1,y1,x2,y2, score, class ...]
+            if y.ndim == 3 and y.shape[-1] >= 6:
                 for row in y[0]:
-                    x1,y1,x2,y2,score,cls = float(row[0]),float(row[1]),float(row[2]),float(row[3]),float(row[4]),float(row[5])
-                    if score>0: boxes.append([x1,y1,x2,y2]); scores.append(score)
-            elif y.ndim==2 and y.shape[-1] >= 6:
+                    score = float(row[4])
+                    if score <= 0:
+                        continue
+                    detections.append({"xyxy": (float(row[0]), float(row[1]), float(row[2]), float(row[3])), "score": score})
+            elif y.ndim == 2 and y.shape[-1] >= 6:
                 for row in y:
-                    x1,y1,x2,y2,score,cls = float(row[0]),float(row[1]),float(row[2]),float(row[3]),float(row[4]),float(row[5])
-                    if score>0: boxes.append([x1,y1,x2,y2]); scores.append(score)
+                    score = float(row[4])
+                    if score <= 0:
+                        continue
+                    detections.append({"xyxy": (float(row[0]), float(row[1]), float(row[2]), float(row[3])), "score": score})
             else:
                 return [], meta
-        # NMS in letterboxed space
-        if boxes:
-            keep = _nms(np.array(boxes), np.array(scores), iou_th=0.45, topk=50)
-            boxes = [boxes[i] for i in keep]; scores = [scores[i] for i in keep]
-        # map back to original
-        xyxy = [_unletterbox_xyxy(b, meta) for b in boxes]
-        return list(zip(xyxy, scores)), meta
+
+        if not detections:
+            return [], meta
+
+        boxes = np.array([det["xyxy"] for det in detections], dtype=np.float32)
+        scores = np.array([float(det.get("score", 0.0)) for det in detections], dtype=np.float32)
+        keep = _nms(boxes, scores, iou_th=0.45, topk=50)
+        detections = [detections[i] for i in keep]
+
+        mapped = []
+        scale = meta.get("scale", 1.0)
+        for det in detections:
+            det_xyxy = _unletterbox_xyxy(det["xyxy"], meta)
+            mapped_det = {
+                "xyxy": det_xyxy,
+                "score": float(det.get("score", 0.0)),
+            }
+            roi = det.get("roi")
+            if roi:
+                center = _unletterbox_point(roi.get("center", (0.0, 0.0)), meta)
+                size = float(roi.get("size", 0.0)) / max(1e-8, scale)
+                rotation = float(roi.get("rotation", 0.0))
+                mapped_det["roi"] = {"center": center, "size": max(size, 1.0), "rotation": rotation}
+            keypoints = det.get("keypoints")
+            if keypoints:
+                mapped_det["keypoints"] = [_unletterbox_point(kp, meta) for kp in keypoints]
+            mapped.append(mapped_det)
+
+        return mapped, meta
 
 class LandmarkONNX:
     """Generic 21-keypoint head (RTMPose-Hand style) returning either (1,21,2/3) or (1,42/63) or heatmaps (1,21,H,W)."""
@@ -366,10 +442,46 @@ class LandmarkONNX:
         self.filters = [OneEuro(**(one_euro_cfg or {"min_cutoff":1.2,"beta":0.025})) for _ in range(21*2)]
 
     def _pre(self, crop):
-        x = cv2.resize(crop, (self.in_w, self.in_h), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+        if crop.shape[0] != self.in_h or crop.shape[1] != self.in_w:
+            crop = cv2.resize(crop, (self.in_w, self.in_h), interpolation=cv2.INTER_LINEAR)
+        x = crop.astype(np.float32)
         x = x / 127.5 - 1.0
         x = np.transpose(x,(2,0,1))[None,...]
         return x
+
+    @staticmethod
+    def _norm_coord(v):
+        v = float(v)
+        if v < -0.01 or v > 1.01:
+            return float(np.clip((v + 1.0) * 0.5, 0.0, 1.0))
+        return float(np.clip(v, 0.0, 1.0))
+
+    def _warp_roi(self, rgb, roi):
+        cx, cy = roi.get("center", (0.0, 0.0))
+        size = float(roi.get("size", 0.0))
+        rotation = float(roi.get("rotation", 0.0))
+        size = max(size, 1.0)
+        half = size / 2.0
+        cos_r = math.cos(rotation)
+        sin_r = math.sin(rotation)
+        offsets = [(-half, -half), (half, -half), (half, half)]
+        src = []
+        for dx, dy in offsets:
+            rx = cx + dx * cos_r - dy * sin_r
+            ry = cy + dx * sin_r + dy * cos_r
+            src.append([rx, ry])
+        src = np.float32(src)
+        dst = np.float32([[0.0, 0.0], [self.in_w - 1.0, 0.0], [self.in_w - 1.0, self.in_h - 1.0]])
+        M = cv2.getAffineTransform(src, dst)
+        crop = cv2.warpAffine(
+            rgb,
+            M,
+            (self.in_w, self.in_h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        Minv = cv2.invertAffineTransform(M)
+        return crop, Minv
 
     @staticmethod
     def _argmax2d(hm):
@@ -394,22 +506,53 @@ class LandmarkONNX:
             conf=float(np.mean(vs))
         return pts, conf
 
-    def infer(self, rgb_crop, bbox_xyxy):
-        x = self._pre(rgb_crop)
+    def infer(self, rgb, detection):
+        roi = detection.get("roi") if isinstance(detection, dict) else None
+        Minv = None
+        if roi:
+            crop, Minv = self._warp_roi(rgb, roi)
+        else:
+            x1, y1, x2, y2 = detection["xyxy"] if isinstance(detection, dict) else detection
+            H, W = rgb.shape[:2]
+            x1i, y1i, x2i, y2i = map(lambda v: int(round(v)), (x1, y1, x2, y2))
+            x1i = int(np.clip(x1i, 0, max(0, W - 1)))
+            y1i = int(np.clip(y1i, 0, max(0, H - 1)))
+            x2i = int(np.clip(x2i, x1i + 1, max(1, W)))
+            y2i = int(np.clip(y2i, y1i + 1, max(1, H)))
+            crop = rgb[y1i:y2i, x1i:x2i].copy()
+        if crop.size == 0:
+            return None, 0.0
+
+        x = self._pre(crop)
         out = self.sess.run(self.out_names, {self.inp.name: x})
         pts01, conf = self._parse(out)
-        if pts01 is None: return None, 0.0
-        # map crop norm -> image coords
-        x1,y1,x2,y2 = bbox_xyxy
-        bw, bh = max(1.0, x2-x1), max(1.0, y2-y1)
-        lm=[]
-        for i,(px,py) in enumerate(pts01):
-            X = x1 + px * bw; Y = y1 + py * bh
-            if self.smooth:
-                X = self.filters[i*2+0].apply(X)
-                Y = self.filters[i*2+1].apply(Y)
-            lm.append((float(X), float(Y)))
-        # normalize to [0..1] later in main
+        if pts01 is None:
+            return None, 0.0
+
+        lm = []
+        if roi and Minv is not None:
+            for i, (px, py) in enumerate(pts01):
+                pxn = self._norm_coord(px) * (self.in_w - 1.0)
+                pyn = self._norm_coord(py) * (self.in_h - 1.0)
+                X = float(Minv[0, 0] * pxn + Minv[0, 1] * pyn + Minv[0, 2])
+                Y = float(Minv[1, 0] * pxn + Minv[1, 1] * pyn + Minv[1, 2])
+                if self.smooth:
+                    X = self.filters[i * 2 + 0].apply(X)
+                    Y = self.filters[i * 2 + 1].apply(Y)
+                lm.append((X, Y))
+        else:
+            x1, y1, x2, y2 = detection["xyxy"] if isinstance(detection, dict) else detection
+            bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
+            for i, (px, py) in enumerate(pts01):
+                pxn = self._norm_coord(px)
+                pyn = self._norm_coord(py)
+                X = x1 + pxn * bw
+                Y = y1 + pyn * bh
+                if self.smooth:
+                    X = self.filters[i * 2 + 0].apply(X)
+                    Y = self.filters[i * 2 + 1].apply(Y)
+                lm.append((float(X), float(Y)))
+
         return lm, float(conf)
 
 class TwoStageHandTracker:
@@ -422,22 +565,18 @@ class TwoStageHandTracker:
         self.presence_th = presence_th
 
     def process(self, rgb):
-        (detections, meta) = self.det.infer(rgb)
+        detections, _ = self.det.infer(rgb)
         H,W = rgb.shape[:2]
         hands_out = []
         # filter by threshold, keep top-k
-        dets = [(xy,sc) for (xy,sc) in detections if sc >= self.score_th]
-        dets = sorted(dets, key=lambda t: t[1], reverse=True)[:self.max_hands]
-        for (x1,y1,x2,y2), sc in dets:
-            x1i,y1i,x2i,y2i = map(lambda v:int(round(v)), (x1,y1,x2,y2))
-            x1i,y1i = max(0,x1i), max(0,y1i); x2i,y2i = min(W-1,x2i), min(H-1,y2i)
-            if x2i<=x1i or y2i<=y1i: continue
-            crop = rgb[y1i:y2i, x1i:x2i].copy()
-            lm, conf = self.lmk.infer(crop, (x1i,y1i,x2i,y2i))
-            if lm is None or conf < self.presence_th: 
+        dets = [det for det in detections if float(det.get("score", 0.0)) >= self.score_th]
+        dets = sorted(dets, key=lambda d: d.get("score", 0.0), reverse=True)[:self.max_hands]
+        for det in dets:
+            lm, conf = self.lmk.infer(rgb, det)
+            if lm is None or conf < self.presence_th:
                 continue  # suppress "flying points"
             # normalize to [0..1] for app
-            lm01 = [(lx/W, ly/H) for (lx,ly) in lm]
+            lm01 = [(float(np.clip(lx / max(1.0, W), 0.0, 1.0)), float(np.clip(ly / max(1.0, H), 0.0, 1.0))) for (lx, ly) in lm]
             label = "Right" if np.mean([p[0] for p in lm01]) > 0.5 else "Left"
             hands_out.append({"lm": lm01, "label": label, "score": float(conf)})
         return hands_out
