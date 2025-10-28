@@ -17,6 +17,10 @@ pip install -r requirements.txt
 ## Модель
 * По умолчанию используется **MediaPipe Hands** (модели идут внутри пакета). CUDA‑эксперименты с оннх‑лэндмарками оставлены в `tracker_onnx.py`, но требуют **отдельного детектора**.
 
+## CUDA / ONNXRuntime
+* Для GPU-версии установи `onnxruntime-gpu` и драйверы CUDA. При запуске onnx-моделей в консоль теперь выводится активный провайдер (`[ONNX] Активен CUDAExecutionProvider ...`).
+* Если CUDA недоступна, сообщение с причинами появится прямо в консоли и произойдёт явный фолбек на CPU. Чтобы сделать CUDA обязательной, можно выставить переменную окружения `GCPC_REQUIRE_CUDA=1` и убедиться, что перед запуском `CUDAExecutionProvider` присутствует в `python -c "import onnxruntime as ort; print(ort.get_available_providers())"`.
+
 ## Запуск
 ```bash
 python -m app.main

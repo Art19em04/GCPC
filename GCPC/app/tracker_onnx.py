@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 # Optional ONNX landmarks-only tracker (needs separate detector). Kept for CUDA experiments.
-import os, numpy as np, cv2, onnxruntime as ort, math
+import os, numpy as np, cv2, math
+
+from .onnx_utils import create_onnx_session
 
 def _is_nchw(shape):
     if len(shape)!=4: return True
@@ -45,12 +47,7 @@ class ONNXHandTracker:
         mp=os.environ.get("HAND_ONNX_PATH","").strip() or os.path.join(models_dir,"hand_landmarks.onnx")
         if not os.path.isfile(mp):
             raise FileNotFoundError(f"Нет модели {mp}. Укажи HAND_ONNX_PATH или положи hand_landmarks.onnx в {models_dir}.")
-        try:
-            ort.preload_dlls()
-        except Exception:
-            pass
-        self.sess=ort.InferenceSession(mp, providers=["CUDAExecutionProvider","CPUExecutionProvider"])
-        print("[ONNX] Providers:", self.sess.get_providers())
+        self.sess=create_onnx_session(mp, prefer_cuda=True, allow_fallback=True, log_prefix="[ONNX]")
         i0=self.sess.get_inputs()[0]; self.input_name=i0.name; self.is_nchw=_is_nchw(i0.shape)
         self.in_h, self.in_w=_input_hw(i0.shape,self.is_nchw)
         self.input_scale=1/255.0; self.input_mean=(0.0,0.0,0.0); self.input_std=(1.0,1.0,1.0)

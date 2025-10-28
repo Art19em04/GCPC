@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 # Two-stage CUDA tracker: detector (bboxes) + landmark head (21 pts)
-import os, cv2, math, numpy as np
-import onnxruntime as ort
+import os, cv2, numpy as np
+
+from .onnx_utils import create_onnx_session
 from .one_euro import OneEuro
 
 def _letterbox(img, newh, neww):
@@ -48,15 +49,10 @@ class DetectorONNX:
        For community hand models, we accept common export: (1, N, 85) with boxes xyxy and cls scores."""
     def __init__(self, path, input_size):
         self.path = path
-        try:
-            ort.preload_dlls()
-        except Exception:
-            pass
-        self.sess = ort.InferenceSession(path, providers=["CUDAExecutionProvider","CPUExecutionProvider"])
+        self.sess = create_onnx_session(path, prefer_cuda=True, allow_fallback=True, log_prefix="[DET]")
         self.inp = self.sess.get_inputs()[0]
         self.in_h, self.in_w = int(input_size[0]), int(input_size[1])
         self.out_names = [o.name for o in self.sess.get_outputs()]
-        print("[DET] Providers:", self.sess.get_providers())
     def infer(self, rgb):
         lb, meta = _letterbox(rgb, self.in_h, self.in_w)
         x = lb.astype(np.float32)/255.0
@@ -88,17 +84,12 @@ class DetectorONNX:
 class LandmarkONNX:
     """Generic 21-keypoint head (RTMPose-Hand style) returning either (1,21,2/3) or (1,42/63) or heatmaps (1,21,H,W)."""
     def __init__(self, path, input_size, smooth=True, one_euro_cfg=None):
-        try:
-            ort.preload_dlls()
-        except Exception:
-            pass
-        self.sess = ort.InferenceSession(path, providers=["CUDAExecutionProvider","CPUExecutionProvider"])
+        self.sess = create_onnx_session(path, prefer_cuda=True, allow_fallback=True, log_prefix="[LMK]")
         self.inp = self.sess.get_inputs()[0]
         self.in_h, self.in_w = int(input_size[0]), int(input_size[1])
         self.out_names = [o.name for o in self.sess.get_outputs()]
         self.smooth = smooth
         self.filters = [OneEuro(**(one_euro_cfg or {"min_cutoff":1.2,"beta":0.025})) for _ in range(21*2)]
-        print("[LMK] Providers:", self.sess.get_providers())
 
     def _pre(self, crop):
         x = cv2.resize(crop, (self.in_w, self.in_h), interpolation=cv2.INTER_LINEAR).astype(np.float32)/255.0
