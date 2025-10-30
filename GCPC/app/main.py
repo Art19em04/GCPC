@@ -51,7 +51,7 @@ def draw_landmarks(frame, lm):
 
 def main():
     cfg=load_config(); app=QtWidgets.QApplication([]); osd=OSD(); osd.show()
-    vcfg=cfg["video"]; idx=int(vcfg.get("camera_index",0)); w=int(vcfg.get("width",1280)); h=int(vcfg.get("height",720)); mirror=bool(vcfg.get("mirror",True))
+    vcfg=cfg["video"]; idx=int(vcfg.get("camera_index",0)); w=int(vcfg.get("width",1280)); h=int(vcfg.get("height",720)); mirror=bool(vcfg.get("mirror",True)); show_fps=bool(vcfg.get("show_fps",False))
     cap=open_camera(idx,w,h); 
     if cap is None: raise RuntimeError("Не удалось открыть камеру")
 
@@ -79,13 +79,19 @@ def main():
     last_R_label=""; last_L_label=""
     left_open_ts=None; undo_window_ms=int(bcfg.get("undo_window_ms",900))
 
+    fps=None; last_frame_time=time.time()
+
     while True:
         QtWidgets.QApplication.processEvents()
         ret, frame = cap.read()
         if not ret: break
         if mirror: frame=cv2.flip(frame,1)
 
-        now_ms=int(time.time()*1000)
+        now=time.time(); dt=now-last_frame_time; last_frame_time=now
+        now_ms=int(now*1000)
+        if show_fps and dt>0:
+            inst=1.0/dt
+            fps = inst if fps is None else (0.9*fps + 0.1*inst)
         rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
         hands=tracker.process(rgb)  # 0..2 hands
 
@@ -174,6 +180,8 @@ def main():
         # debug draw
         if right: draw_landmarks(frame, right["lm"])
         if left:  draw_landmarks(frame, left["lm"])
+        if show_fps and fps is not None:
+            cv2.putText(frame, f"FPS: {fps:5.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
         cv2.imshow("GCPC - Camera", frame)
         if cv2.waitKey(1)&0xFF==27: break
 
