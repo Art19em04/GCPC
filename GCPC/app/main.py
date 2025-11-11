@@ -220,22 +220,56 @@ def main():
     candidate_ignore = {str(g).upper() for g in seq_ctrl.get("candidate_ignore", ["OPEN_PALM", "FIST"])}
 
     confirm_cfg = seq_ctrl.get("confirm", {})
-    confirm_hand = resolve_side(confirm_cfg.get("hand", "non_dominant"), hands)
-    confirm_gesture = str(confirm_cfg.get("gesture", "PINCH_TAP")).upper()
+    confirm_binding_value = (
+        confirm_cfg.get("binding")
+        if isinstance(confirm_cfg, dict)
+        else confirm_cfg
+    )
+    confirm_binding = _parse_single_binding(
+        confirm_binding_value,
+        "NON_DOMINANT-FUNCTIONAL-PINCH_TAP",
+        "non_dominant",
+        "PINCH_TAP",
+    )
+    confirm_hand = confirm_binding["hand"]
+    confirm_gesture = confirm_binding["gesture"]
     confirm_deb = DebouncedTrigger(
         int(confirm_cfg.get("dwell_ms", 220)),
         int(confirm_cfg.get("refractory_ms", 700)),
     )
 
     undo_cfg = seq_ctrl.get("undo", {})
-    undo_hand = resolve_side(undo_cfg.get("hand", "non_dominant"), hands)
-    undo_start = str(undo_cfg.get("start_gesture", "OPEN_PALM")).upper()
-    undo_end = str(undo_cfg.get("end_gesture", "FIST")).upper()
+    undo_binding_value = (
+        undo_cfg.get("binding")
+        if isinstance(undo_cfg, dict)
+        else undo_cfg
+    )
+    undo_binding = _parse_sequence_binding(
+        undo_binding_value,
+        "NON_DOMINANT-FUNCTIONAL-OPEN_PALM > FUNCTIONAL-FIST",
+        "non_dominant",
+        ("OPEN_PALM", "FIST"),
+    )
+    undo_hand = undo_binding["hand"]
+    undo_steps = undo_binding["gestures"]
+    undo_start = undo_steps[0]
+    undo_end = undo_steps[-1] if len(undo_steps) > 1 else undo_steps[0]
     undo_window_ms = int(undo_cfg.get("window_ms", 900))
 
     commit_cfg = seq_ctrl.get("commit", {})
-    commit_hand = resolve_side(commit_cfg.get("hand", "both"), hands)
-    commit_gesture = str(commit_cfg.get("gesture", "FIST")).upper()
+    commit_binding_value = (
+        commit_cfg.get("binding")
+        if isinstance(commit_cfg, dict)
+        else commit_cfg
+    )
+    commit_binding = _parse_single_binding(
+        commit_binding_value,
+        "BOTH-FUNCTIONAL-FIST",
+        "both",
+        "FIST",
+    )
+    commit_hand = commit_binding["hand"]
+    commit_gesture = commit_binding["gesture"]
     commit_deb = DebouncedTrigger(
         int(commit_cfg.get("dwell_ms", 260)),
         int(commit_cfg.get("refractory_ms", 1200)),
@@ -276,25 +310,78 @@ def main():
     mode_cfg = cfg.get("mode_switches", {})
     mode_refractory_ms = int(mode_cfg.get("refractory_ms", 800))
 
-    def _parse_trigger(name, default_hand, default_gesture):
-        entry = mode_cfg.get(name, {})
-        if isinstance(entry, str):
-            entry = {"gesture": entry}
-        result = {"hand": default_hand, "gesture": default_gesture}
-        if isinstance(entry, dict):
-            if "hand" in entry and entry["hand"] is not None:
-                result["hand"] = entry["hand"]
-            if "gesture" in entry and entry["gesture"] is not None:
-                result["gesture"] = str(entry["gesture"]).upper()
-        result["hand"] = resolve_side(result["hand"], hands)
-        result["gesture"] = result["gesture"].upper()
-        return result
+    def _binding_from_string(raw_binding):
+        if not isinstance(raw_binding, str):
+            return None
+        parsed = parse_mapping_key(raw_binding, hands)
+        if not parsed:
+            return None
+        side, gestures = parsed
+        if not gestures:
+            return None
+        return side, gestures
+
+    def _parse_single_binding(raw_value, default_binding, default_hand, default_gesture):
+        def _fallback():
+            return {
+                "hand": resolve_side(default_hand, hands),
+                "gesture": str(default_gesture).upper(),
+            }
+
+        candidate = raw_value if raw_value is not None else default_binding
+        if isinstance(candidate, str):
+            parsed = _binding_from_string(candidate)
+            if parsed:
+                side, gestures = parsed
+                return {"hand": side, "gesture": gestures[-1]}
+        if isinstance(candidate, dict):
+            hand_token = candidate.get("hand", default_hand)
+            gesture_token = candidate.get("gesture", default_gesture)
+            return {
+                "hand": resolve_side(hand_token, hands),
+                "gesture": str(gesture_token).upper(),
+            }
+        if candidate is not default_binding:
+            return _parse_single_binding(None, default_binding, default_hand, default_gesture)
+        return _fallback()
+
+    def _parse_sequence_binding(raw_value, default_binding, default_hand, default_gestures):
+        def _fallback():
+            return {
+                "hand": resolve_side(default_hand, hands),
+                "gestures": [str(g).upper() for g in default_gestures],
+            }
+
+        candidate = raw_value if raw_value is not None else default_binding
+        if isinstance(candidate, str):
+            parsed = _binding_from_string(candidate)
+            if parsed:
+                side, gestures = parsed
+                if gestures:
+                    return {"hand": side, "gestures": gestures}
+        if isinstance(candidate, dict):
+            hand_token = candidate.get("hand", default_hand)
+            start_g = candidate.get("start_gesture", default_gestures[0])
+            end_g = candidate.get("end_gesture", default_gestures[-1])
+            return {
+                "hand": resolve_side(hand_token, hands),
+                "gestures": [str(start_g).upper(), str(end_g).upper()],
+            }
+        if candidate is not default_binding:
+            return _parse_sequence_binding(None, default_binding, default_hand, default_gestures)
+        return _fallback()
+
+    def _parse_trigger(name, default_binding, default_hand, default_gesture):
+        entry = mode_cfg.get(name)
+        binding = _parse_single_binding(entry, default_binding, default_hand, default_gesture)
+        binding["gesture"] = binding["gesture"].upper()
+        return binding
 
     mode_triggers = {
-        "one_hand": _parse_trigger("one_hand", "non_dominant", "FIST"),
-        "record": _parse_trigger("record", "both", "OPEN_PALM"),
-        "mouse": _parse_trigger("mouse", "non_dominant", "THUMBS_UP"),
-        "exit": _parse_trigger("exit", "non_dominant", "SWIPE_LEFT"),
+        "one_hand": _parse_trigger("one_hand", "NON_DOMINANT-FUNCTIONAL-FIST", "non_dominant", "FIST"),
+        "record": _parse_trigger("record", "BOTH-FUNCTIONAL-OPEN_PALM", "both", "OPEN_PALM"),
+        "mouse": _parse_trigger("mouse", "NON_DOMINANT-FUNCTIONAL-THUMBS_UP", "non_dominant", "THUMBS_UP"),
+        "exit": _parse_trigger("exit", "NON_DOMINANT-FUNCTIONAL-SWIPE_LEFT", "non_dominant", "SWIPE_LEFT"),
     }
 
     def _trigger_label(trig):

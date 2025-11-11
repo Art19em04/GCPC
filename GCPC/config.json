@@ -62,22 +62,10 @@
   },
   "mode_switches": {
     "refractory_ms": 800,
-    "one_hand": {
-      "hand": "non_dominant",
-      "gesture": "FIST"
-    },
-    "record": {
-      "hand": "both",
-      "gesture": "OPEN_PALM"
-    },
-    "mouse": {
-      "hand": "non_dominant",
-      "gesture": "THUMBS_UP"
-    },
-    "exit": {
-      "hand": "non_dominant",
-      "gesture": "SWIPE_LEFT"
-    }
+    "one_hand": "NON_DOMINANT-FUNCTIONAL-FIST",
+    "record": "BOTH-FUNCTIONAL-OPEN_PALM",
+    "mouse": "NON_DOMINANT-FUNCTIONAL-THUMBS_UP",
+    "exit": "NON_DOMINANT-FUNCTIONAL-SWIPE_LEFT"
   },
   "controls": {
     "sequence": {
@@ -87,20 +75,16 @@
         "FIST"
       ],
       "confirm": {
-        "hand": "non_dominant",
-        "gesture": "PINCH_TAP",
+        "binding": "NON_DOMINANT-FUNCTIONAL-PINCH_TAP",
         "dwell_ms": 220,
         "refractory_ms": 700
       },
       "undo": {
-        "hand": "non_dominant",
-        "start_gesture": "OPEN_PALM",
-        "end_gesture": "FIST",
+        "binding": "NON_DOMINANT-FUNCTIONAL-OPEN_PALM > FUNCTIONAL-FIST",
         "window_ms": 900
       },
       "commit": {
-        "hand": "both",
-        "gesture": "FIST",
+        "binding": "BOTH-FUNCTIONAL-FIST",
         "dwell_ms": 260,
         "refractory_ms": 1200,
         "exit_on_commit": true
