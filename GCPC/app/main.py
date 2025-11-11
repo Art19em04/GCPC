@@ -434,37 +434,45 @@ def main():
         trig_label = _trigger_label(mode_triggers["one_hand"])
         one_active_hint = f"{trig_label} → SINGLE" if trig_label else "ONE-HAND"
 
-    def _binding_active(binding, right_present, left_present):
+    def _binding_active(binding, right_present, left_present, event_right, event_left):
         if not binding:
             return False
         gesture = binding.get("gesture")
         if not gesture:
             return False
         hand = (binding.get("hand") or "").upper()
+        gesture = str(gesture).upper()
+
+        def _side_active(side_name):
+            if side_name == "RIGHT":
+                if not right_present:
+                    return False
+                state = gR
+                event = event_right
+            elif side_name == "LEFT":
+                if not left_present:
+                    return False
+                state = gL
+                event = event_left
+            else:
+                return False
+            flag = state.pose_flags.get(gesture)
+            if flag:
+                return True
+            return event == gesture
+
         if hand == "BOTH":
-            return bool(
-                right_present
-                and left_present
-                and gR.pose_flags.get(gesture, False)
-                and gL.pose_flags.get(gesture, False)
-            )
+            return _side_active("RIGHT") and _side_active("LEFT")
         if hand in ("ANY", "EITHER"):
-            return bool(
-                (right_present and gR.pose_flags.get(gesture, False))
-                or (left_present and gL.pose_flags.get(gesture, False))
-            )
+            return _side_active("RIGHT") or _side_active("LEFT")
         if hand == "RIGHT":
-            return bool(right_present and gR.pose_flags.get(gesture, False))
+            return _side_active("RIGHT")
         if hand == "LEFT":
-            return bool(left_present and gL.pose_flags.get(gesture, False))
+            return _side_active("LEFT")
         if hand == dominant_side:
-            if dominant_side == "RIGHT":
-                return bool(right_present and gR.pose_flags.get(gesture, False))
-            return bool(left_present and gL.pose_flags.get(gesture, False))
+            return _side_active(dominant_side)
         if hand == support_side:
-            if support_side == "RIGHT":
-                return bool(right_present and gR.pose_flags.get(gesture, False))
-            return bool(left_present and gL.pose_flags.get(gesture, False))
+            return _side_active(support_side)
         return False
 
     mouse_cfg = cfg.get("mouse_control", {})
@@ -791,8 +799,20 @@ def main():
                     )
                 mx, my = mouse_prev
                 mouse_move_normalized(mx, my)
-                left_active = _binding_active(mouse_left_binding, right_present, left_present)
-                right_active = _binding_active(mouse_right_binding, right_present, left_present)
+                left_active = _binding_active(
+                    mouse_left_binding,
+                    right_present,
+                    left_present,
+                    evR,
+                    evL,
+                )
+                right_active = _binding_active(
+                    mouse_right_binding,
+                    right_present,
+                    left_present,
+                    evR,
+                    evL,
+                )
                 if left_active and not mouse_left_down:
                     mouse_press("left")
                     mouse_left_down = True
