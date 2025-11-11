@@ -403,6 +403,28 @@ def main():
             prefix = hand
         return f"{prefix} {gesture_txt}".strip()
 
+    def _hand_token_label(side):
+        if not side:
+            return "DOMINANT"
+        side = side.upper()
+        if side in ("BOTH", "EITHER", "ANY", "RIGHT", "LEFT"):
+            return side
+        if side == dominant_side:
+            return "DOMINANT"
+        if side == support_side:
+            return "NON_DOMINANT"
+        return side
+
+    def _binding_notation(binding, context="SINGLE"):
+        if not binding:
+            return ""
+        gesture = binding.get("gesture") or ""
+        hand = binding.get("hand")
+        token = _hand_token_label(hand or dominant_side)
+        if not gesture:
+            return token
+        return f"{token}-{context}-{gesture}"
+
     one_cfg = cfg.get("one_hand_mode", {})
     one_enabled = bool(one_cfg.get("enabled", True))
     one_status_label = one_cfg.get("status_label") or "ONE-HAND"
@@ -412,27 +434,103 @@ def main():
         trig_label = _trigger_label(mode_triggers["one_hand"])
         one_active_hint = f"{trig_label} → SINGLE" if trig_label else "ONE-HAND"
 
+    def _binding_active(binding, right_present, left_present):
+        if not binding:
+            return False
+        gesture = binding.get("gesture")
+        if not gesture:
+            return False
+        hand = (binding.get("hand") or "").upper()
+        if hand == "BOTH":
+            return bool(
+                right_present
+                and left_present
+                and gR.pose_flags.get(gesture, False)
+                and gL.pose_flags.get(gesture, False)
+            )
+        if hand in ("ANY", "EITHER"):
+            return bool(
+                (right_present and gR.pose_flags.get(gesture, False))
+                or (left_present and gL.pose_flags.get(gesture, False))
+            )
+        if hand == "RIGHT":
+            return bool(right_present and gR.pose_flags.get(gesture, False))
+        if hand == "LEFT":
+            return bool(left_present and gL.pose_flags.get(gesture, False))
+        if hand == dominant_side:
+            if dominant_side == "RIGHT":
+                return bool(right_present and gR.pose_flags.get(gesture, False))
+            return bool(left_present and gL.pose_flags.get(gesture, False))
+        if hand == support_side:
+            if support_side == "RIGHT":
+                return bool(right_present and gR.pose_flags.get(gesture, False))
+            return bool(left_present and gL.pose_flags.get(gesture, False))
+        return False
+
     mouse_cfg = cfg.get("mouse_control", {})
     mouse_enabled = bool(mouse_cfg.get("enabled", True))
     mouse_status_label = mouse_cfg.get("status_label") or "MOUSE"
     mouse_smooth = max(0.0, min(1.0, float(mouse_cfg.get("smoothing_alpha", 0.25))))
-    pointer_side = resolve_side(mouse_cfg.get("pointer_hand", "dominant"), hands)
+    pointer_hand_token = mouse_cfg.get("pointer_hand", "dominant")
+    pointer_side = resolve_side(pointer_hand_token, hands)
     if pointer_side not in ("RIGHT", "LEFT"):
         pointer_side = dominant_side
     pointer_landmark = int(mouse_cfg.get("pointer_landmark", 8))
     if pointer_landmark < 0 or pointer_landmark > 20:
         pointer_landmark = 8
-    mouse_left_pose = str(mouse_cfg.get("left_click_pose", "FIST")).upper()
-    mouse_right_pose = str(mouse_cfg.get("right_click_pose", "OPEN_PALM")).upper()
+
+    def _read_mouse_binding(key, legacy_key, default_binding, default_hand, default_gesture):
+        raw_value = mouse_cfg.get(key)
+        display_source = raw_value
+        if raw_value is None and legacy_key:
+            legacy = mouse_cfg.get(legacy_key)
+            if isinstance(legacy, str) and legacy.strip():
+                normalized = legacy.strip().upper()
+                inferred_hand = _hand_token_label(pointer_side)
+                raw_value = f"{inferred_hand}-SINGLE-{normalized}"
+                display_source = raw_value
+        binding = _parse_single_binding(
+            raw_value,
+            default_binding,
+            default_hand,
+            default_gesture,
+        )
+        gesture = binding.get("gesture") or ""
+        binding["gesture"] = gesture.upper()
+        label = None
+        if isinstance(display_source, str) and display_source.strip():
+            label = display_source.strip().upper()
+        elif isinstance(display_source, dict):
+            hand_token = resolve_side(display_source.get("hand"), hands)
+            gesture_token = display_source.get("gesture", default_gesture)
+            label = _binding_notation(
+                {"hand": hand_token, "gesture": str(gesture_token).upper()},
+                "SINGLE",
+            )
+        if not label:
+            label = _binding_notation(binding, "SINGLE")
+        return binding, label
+
+    mouse_left_binding, mouse_left_label = _read_mouse_binding(
+        "left_click_binding",
+        "left_click_pose",
+        "DOMINANT-SINGLE-FIST",
+        "dominant",
+        "FIST",
+    )
+    mouse_right_binding, mouse_right_label = _read_mouse_binding(
+        "right_click_binding",
+        "right_click_pose",
+        "DOMINANT-SINGLE-OPEN_PALM",
+        "dominant",
+        "OPEN_PALM",
+    )
     mouse_active_hint = mouse_cfg.get("active_hint")
     if not mouse_active_hint:
         trig_label = _trigger_label(mode_triggers["mouse"])
-        pointer_txt = pointer_side
-        mouse_active_hint = (
-            f"{trig_label} | CURSOR: {pointer_txt} POINT | LMB: {mouse_left_pose} | RMB: {mouse_right_pose}"
-            if trig_label
-            else "CURSOR CONTROL"
-        )
+        pointer_hint = _binding_notation({"hand": pointer_side, "gesture": "POINT"}, "SINGLE")
+        base_hint = f"CURSOR: {pointer_hint} | LMB: {mouse_left_label} | RMB: {mouse_right_label}"
+        mouse_active_hint = f"{trig_label} | {base_hint}" if trig_label else base_hint
 
     mouse_prev = None
     mouse_left_down = False
@@ -672,7 +770,8 @@ def main():
 
         if mouse_active:
             pointer_source = right if pointer_side == "RIGHT" else left
-            pointer_state = gR if pointer_side == "RIGHT" else gL
+            right_present = bool(right)
+            left_present = bool(left)
             if pointer_source:
                 tip = pointer_source["lm"][pointer_landmark]
                 target = (tip[0], tip[1])
@@ -686,8 +785,8 @@ def main():
                     )
                 mx, my = mouse_prev
                 mouse_move_normalized(mx, my)
-                left_active = bool(pointer_state.pose_flags.get(mouse_left_pose, False))
-                right_active = bool(pointer_state.pose_flags.get(mouse_right_pose, False))
+                left_active = _binding_active(mouse_left_binding, right_present, left_present)
+                right_active = _binding_active(mouse_right_binding, right_present, left_present)
                 if left_active and not mouse_left_down:
                     mouse_press("left")
                     mouse_left_down = True
