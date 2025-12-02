@@ -120,30 +120,5 @@
       "DOMINANT-SEQUENCE-OPEN_PALM": "ALT+SHIFT+ESC",
       "DOMINANT-SEQUENCE-FIST": "ALT+ESC"
     }
-  },
-
-  "__comment_help_gesture_notation": "--------REFERENCE: GESTURE NOTATION---------",
-  "_gesture_notation": [
-    "Блок строится как [СТОРОНА]-[КОНТЕКСТ]-[ЖЕСТ], где сторона может быть LEFT/RIGHT/BOTH или DOMINANT/NON_DOMINANT",
-    "Каждый фрагмент последовательности должен содержать все три части и, при необходимости, повторять сторону для ясности",
-    "КОНТЕКСТ помогает понять канал ввода: SINGLE для одиночных жестов, SEQUENCE для записываемых шагов, FUNCTIONAL для служебных жестов",
-    "Последовательность жестов разделяется символом '>' и читается слева направо",
-    "Пример: DOMINANT-SEQUENCE-SWIPE_LEFT > DOMINANT-SEQUENCE-SWIPE_RIGHT — сначала ведущая рука выполняет SWIPE_LEFT в режиме последовательности, затем та же рука выполняет SWIPE_RIGHT как следующий шаг"
-  ],
-
-  "__comment_help_pc_actions": "--------REFERENCE: PC ACTIONS DESCRIPTION---------",
-  "_pc_actions": [
-    "MODE_ONE_HAND — переключение в одноручный режим",
-    "MODE_MOUSE — управление курсором",
-    "MODE_RECORD — запись жестовой последовательности",
-    "MODE_EXIT — выход в режим ожидания",
-    "CONFIRM_STEP — добавление жеста в последовательность",
-    "UNDO_STEP — удаление последнего жеста в последовательности",
-    "COMMIT_SEQUENCE — применение записанной последовательности",
-    "CTRL+ALT+T — запуск терминала",
-    "ALT+F4 — закрытие активного окна",
-    "ALT+TAB — переключение между окнами",
-    "CTRL+C — копирование",
-    "CTRL+V — вставка"
-  ]
+  }
 }
