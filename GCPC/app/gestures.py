@@ -79,41 +79,27 @@ class GestureState:
         """Update gesture state from landmarks and return detected gesture name."""
         now = time.time() * 1000.0
         self.wrist_hist.append((now, lm[WRIST]))
-        swipe = None
-        if len(self.wrist_hist) >= 2:
-            t0, p0 = self.wrist_hist[0]
-            t1, p1 = self.wrist_hist[-1]
-            dt = max(1e-3, (t1 - t0) / 1000.0)
-            vx = (p1[0] - p0[0]) / dt
-            if abs(vx) > 1.0 * (self.cfg.get("swipe_speed_px", 800) / 800.0):
-                swipe = "SWIPE_RIGHT" if vx > 0 else "SWIPE_LEFT"
         pinch_d = _dist(lm[THUMB_TIP], lm[INDEX_TIP]);
         pinch = pinch_d < self.cfg.get("pinch_threshold", 0.045)
         flex = finger_flexion(lm);
         avg_other = (flex["middle"] + flex["ring"] + flex["pinky"]) / 3.0
         tu_thumb = self.cfg.get("thumbs_up_thumb_max_flex", 0.35)
         tu_others = self.cfg.get("thumbs_up_others_min_flex", 0.5)
-        pt_idx = self.cfg.get("point_index_max_flex", 0.30)
-        pt_others = self.cfg.get("point_others_min_flex", 0.5)
         fist_thr = self.cfg.get("fist_threshold", 0.35)
         is_open = (flex["index"] < 0.35 and flex["middle"] < 0.35 and flex["ring"] < 0.35 and flex["pinky"] < 0.35)
         is_fist = (flex["index"] > fist_thr and flex["middle"] > fist_thr and flex["ring"] > fist_thr and flex[
             "pinky"] > fist_thr)
         is_thumbs_up = (flex["thumb"] < tu_thumb and avg_other > tu_others)
-        is_point = (flex["index"] < pt_idx and avg_other > pt_others)
         self.pose_flags = {"OPEN_PALM": bool(is_open), "FIST": bool(is_fist), "THUMBS_UP": bool(is_thumbs_up),
-                           "POINT": bool(is_point), "PINCH": bool(pinch),
-                           "SWIPE_LEFT": swipe == "SWIPE_LEFT", "SWIPE_RIGHT": swipe == "SWIPE_RIGHT"}
+                           "PINCH": bool(pinch)}
         clutch = self.cfg.get("clutch", "none")
         ready = True if clutch == "none" else pinch
         emit = None
-        if swipe and ready and self._can_emit(swipe, now):
-            emit = swipe
-        elif not self.prev_pinch and pinch and ready and self._can_emit("PINCH_TAP", now):
+        if not self.prev_pinch and pinch and ready and self._can_emit("PINCH_TAP", now):
             emit = "PINCH_TAP"
         elif pinch and ready:
-            if not self.hold_latched and self._can_emit("PINCH_HOLD", now):
-                emit = "PINCH_HOLD"
+            if not self.hold_latched and self._can_emit("PINCH", now):
+                emit = "PINCH"
                 self.hold_latched = True
         else:
             self.hold_latched = False
@@ -121,8 +107,6 @@ class GestureState:
             emit = emit or "FIST"
         if is_thumbs_up and ready and self._can_emit("THUMBS_UP", now):
             emit = emit or "THUMBS_UP"
-        if is_point and ready and self._can_emit("POINT", now):
-            emit = emit or "POINT"
         if is_open and ready and self._can_emit("OPEN_PALM", now):
             emit = emit or "OPEN_PALM"
         if emit:

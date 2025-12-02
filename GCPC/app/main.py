@@ -45,7 +45,7 @@ def main():
         return max(lo, min(hi, val))
 
     def _active_pose_name(state: GestureState, fallback: str) -> str:
-        for name in ("PINCH", "FIST", "THUMBS_UP", "POINT", "OPEN_PALM", "SWIPE_LEFT", "SWIPE_RIGHT"):
+        for name in ("PINCH", "FIST", "THUMBS_UP", "OPEN_PALM"):
             if state.pose_flags.get(name):
                 return name
         return fallback or "—"
@@ -307,7 +307,7 @@ def main():
     mouse_active_hint = mouse_cfg.get("active_hint")
     if not mouse_active_hint:
         trig_label = trigger_label(mode_triggers["mouse"], dominant_side, support_side)
-        pointer_hint = binding_notation({"hand": pointer_side, "gesture": "POINT"}, dominant_side, support_side)
+        pointer_hint = binding_notation({"hand": pointer_side, "gesture": "PINCH"}, dominant_side, support_side)
         base_hint = f"CURSOR: {pointer_hint} | LMB: {mouse_left_label} | RMB: {mouse_right_label}"
         mouse_active_hint = f"{trig_label} | {base_hint}" if trig_label else base_hint
 
@@ -348,9 +348,6 @@ def main():
             "fist": [],
             "thumbs_thumb": [],
             "thumbs_others": [],
-            "point_index": [],
-            "point_others": [],
-            "swipe_speed": [],
         }
 
     def _record_calibration(state: GestureState, lm):
@@ -368,16 +365,6 @@ def main():
         if state.pose_flags.get("THUMBS_UP"):
             calibration_data["thumbs_thumb"].append(flex["thumb"])
             calibration_data["thumbs_others"].append(avg_other)
-        if state.pose_flags.get("POINT"):
-            calibration_data["point_index"].append(flex["index"])
-            calibration_data["point_others"].append(avg_other)
-        if state.pose_flags.get("SWIPE_LEFT") or state.pose_flags.get("SWIPE_RIGHT"):
-            if len(state.wrist_hist) >= 2:
-                t0, p0 = state.wrist_hist[0]
-                t1, p1 = state.wrist_hist[-1]
-                dt = max(1e-3, (t1 - t0) / 1000.0)
-                vx = abs((p1[0] - p0[0]) / dt)
-                calibration_data["swipe_speed"].append(vx)
 
     def _finalize_calibration(now_ms: int):
         nonlocal calibration_active, cfg
@@ -416,33 +403,11 @@ def main():
             lambda v: _clamp(v * 0.9, 0.3, 0.95),
             "thumbs_up_others_min_flex",
         )
-        point_idx = or_default(
-            calibration_data["point_index"],
-            0.8,
-            lambda v: _clamp(v * 1.1, 0.05, 0.7),
-            "point_index_max_flex",
-        )
-        point_others = or_default(
-            calibration_data["point_others"],
-            0.2,
-            lambda v: _clamp(v * 0.9, 0.3, 0.95),
-            "point_others_min_flex",
-        )
-        swipe_thr = or_default(
-            calibration_data["swipe_speed"],
-            0.5,
-            lambda v: int(_clamp(v * 800 * 0.9, 200, 2000)),
-            "swipe_speed_px",
-        )
-
         updates = {
             "pinch_threshold": pinch_thr,
             "fist_threshold": fist_thr,
             "thumbs_up_thumb_max_flex": thumbs_thumb,
             "thumbs_up_others_min_flex": thumbs_other,
-            "point_index_max_flex": point_idx,
-            "point_others_min_flex": point_others,
-            "swipe_speed_px": swipe_thr,
         }
         ge_cfg.update(updates)
         cfg["gesture_engine"] = ge_cfg
@@ -639,25 +604,26 @@ def main():
 
         time_since_change = now_ms - mode_last_change_ms
 
-        if current_mode != "idle" and _trigger_fired(mode_triggers["exit"]):
-            switch_mode("idle", now_ms, force_reset=True)
-        elif _trigger_fired(mode_triggers["record"]) and time_since_change >= mode_refractory_ms:
-            if current_mode == "record":
-                switch_mode("record", now_ms, force_reset=True)
-            elif current_mode == "idle":
-                switch_mode("record", now_ms)
-        elif mouse_enabled and _trigger_fired(mode_triggers["mouse"]) and time_since_change >= mode_refractory_ms:
-            if current_mode == "mouse":
-                switch_mode("mouse", now_ms, force_reset=True)
-            elif current_mode == "idle":
-                switch_mode("mouse", now_ms)
-        elif calibration_enabled and mode_triggers.get("calibrate") and _trigger_fired(mode_triggers["calibrate"]) and time_since_change >= mode_refractory_ms:
-            switch_mode("calibrate", now_ms, force_reset=True)
-        elif one_enabled and _trigger_fired(mode_triggers["one_hand"]) and time_since_change >= mode_refractory_ms:
-            if current_mode == "one_hand":
-                switch_mode("one_hand", now_ms, force_reset=True)
-            elif current_mode == "idle":
-                switch_mode("one_hand", now_ms)
+        if not calibration_active:
+            if current_mode != "idle" and _trigger_fired(mode_triggers["exit"]):
+                switch_mode("idle", now_ms, force_reset=True)
+            elif _trigger_fired(mode_triggers["record"]) and time_since_change >= mode_refractory_ms:
+                if current_mode == "record":
+                    switch_mode("record", now_ms, force_reset=True)
+                elif current_mode == "idle":
+                    switch_mode("record", now_ms)
+            elif mouse_enabled and _trigger_fired(mode_triggers["mouse"]) and time_since_change >= mode_refractory_ms:
+                if current_mode == "mouse":
+                    switch_mode("mouse", now_ms, force_reset=True)
+                elif current_mode == "idle":
+                    switch_mode("mouse", now_ms)
+            elif calibration_enabled and mode_triggers.get("calibrate") and _trigger_fired(mode_triggers["calibrate"]) and time_since_change >= mode_refractory_ms:
+                switch_mode("calibrate", now_ms, force_reset=True)
+            elif one_enabled and _trigger_fired(mode_triggers["one_hand"]) and time_since_change >= mode_refractory_ms:
+                if current_mode == "one_hand":
+                    switch_mode("one_hand", now_ms, force_reset=True)
+                elif current_mode == "idle":
+                    switch_mode("one_hand", now_ms)
 
         if current_mode != "mouse":
             mouse_prev = None
