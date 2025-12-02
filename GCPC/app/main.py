@@ -361,7 +361,7 @@ def main():
     calibration_active = False
     calibration_start_ms = 0
     calibration_stage_ms = 0
-    calibration_stage_idx = 0
+    calibration_stage_idx = -1
     calibration_data: Dict[str, List[float]] = {}
 
     one_hand_active = False
@@ -387,10 +387,17 @@ def main():
             return calibration_stages[calibration_stage_idx]
         return None
 
+    def _begin_calibration_stage(idx: int, now_ms: int):
+        nonlocal calibration_stage_idx, calibration_stage_ms
+        calibration_stage_idx = idx
+        calibration_stage_ms = now_ms
+        stage = _current_calibration_stage()
+        _announce_stage(stage)
+
     def _announce_stage(stage):
         if not stage:
             return
-        idx = calibration_stages.index(stage)
+        idx = calibration_stage_idx if calibration_stage_idx >= 0 else calibration_stages.index(stage)
         print(
             f"[CALIBRATION] Stage {idx + 1}/{len(calibration_stages)}: "
             f"{stage['name']} ({stage['dur_ms']} ms) — {stage['hint']}"
@@ -437,19 +444,21 @@ def main():
             elapsed = now_ms - calibration_stage_ms
             if elapsed < stage["dur_ms"]:
                 return False
-            calibration_stage_idx += 1
-            if calibration_stage_idx >= len(calibration_stages):
+            next_idx = calibration_stage_idx + 1
+            if next_idx >= len(calibration_stages):
                 _finalize_calibration(now_ms)
                 return True
-            calibration_stage_ms = now_ms
-            _announce_stage(_current_calibration_stage())
+            _begin_calibration_stage(next_idx, now_ms)
 
     def _finalize_calibration(now_ms: int):
-        nonlocal calibration_active, cfg
+        nonlocal calibration_active, cfg, calibration_stage_idx
         if not calibration_active:
             return
         calibration_active = False
         ge_cfg = cfg.get("gesture_engine", {})
+
+        # Reset stage index so a new calibration starts from the first stage label.
+        calibration_stage_idx = -1
 
         def or_default(values: List[float], fraction: float, transform, fallback_key: str):
             val = _percentile(values, fraction)
@@ -547,10 +556,8 @@ def main():
         if new_mode == "calibrate" and calibration_enabled:
             calibration_active = True
             calibration_start_ms = now_ms
-            calibration_stage_ms = now_ms
-            calibration_stage_idx = 0
             calibration_data = _new_calibration_data()
-            _announce_stage(_current_calibration_stage())
+            _begin_calibration_stage(0, now_ms)
 
         # --- one-hand ---
         if new_mode != "one_hand":
