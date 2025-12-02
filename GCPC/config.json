@@ -74,10 +74,10 @@
     "pointer_hand": "dominant",
     "pointer_landmark": 8,
     "control_rect": {
-      "x": 0.08,
-      "y": 0.08,
-      "width": 0.84,
-      "height": 0.84
+      "x": 0.45,
+      "y": 0.3,
+      "width": 0.5,
+      "height": 0.5
     },
     "left_click_binding": "NON_DOMINANT-OPEN_PALM > NON_DOMINANT-FIST",
     "right_click_binding": "NON_DOMINANT-PINCH_TAP"
