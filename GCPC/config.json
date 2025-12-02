@@ -2,7 +2,6 @@
   "__comment_backend": "-------CORE BACKEND SETTINGS-------",
   "backend": "mediapipe",
   "onnx_landmarks": true,
-
   "__comment_detector": "-------DETECTOR SETTINGS---------",
   "detector": {
     "min_detection_confidence": 0.6,
@@ -10,7 +9,6 @@
     "max_num_hands": 2,
     "model_complexity": 1
   },
-
   "__comment_video": "--------CAMERA SETTINGS---------",
   "video": {
     "camera_index": 0,
@@ -19,30 +17,27 @@
     "mirror": true,
     "show_fps": true
   },
-
   "__comment_hands": "--------HAND ROLES / SIDES---------",
   "hands": {
     "dominant": "RIGHT",
     "support": "LEFT"
   },
-
   "__comment_gesture_engine": "--------LOW-LEVEL GESTURE ENGINE---------",
   "gesture_engine": {
     "clutch": "none",
     "cooldown_ms": 420,
-    "pinch_threshold": 0.045,
-    "fist_threshold": 0.35,
-    "thumbs_up_thumb_max_flex": 0.35,
-    "thumbs_up_others_min_flex": 0.5
+    "pinch_threshold": 0.05564512825299441,
+    "fist_threshold": 0.6444952612983096,
+    "thumbs_up_thumb_max_flex": 0.06815964219488951,
+    "thumbs_up_others_min_flex": 0.5868037334858223,
+    "open_palm_max_flex": 0.35
   },
-
   "__comment_calibration": "--------AUTO CALIBRATION SETTINGS---------",
   "calibration": {
     "enabled": true,
     "duration_ms": 12000,
     "trigger_key": "c"
   },
-
   "__comment_sequence": "--------SEQUENCE RECORDING ENGINE---------",
   "sequence": {
     "arm_delay_ms": 420,
@@ -53,14 +48,12 @@
     "max_len": 6,
     "exit_on_commit": true
   },
-
   "__comment_sounds": "--------SOUNDS / FEEDBACK---------",
   "sounds": {
     "on_toggle": false,
     "on_commit": false,
     "on_send": false
   },
-
   "__comment_one_hand_mode": "--------ONE-HAND MODE CONFIG---------",
   "one_hand_mode": {
     "enabled": true,
@@ -68,7 +61,6 @@
     "active_hint": "",
     "dispatch_hand": "dominant"
   },
-
   "__comment_mouse_control": "--------MOUSE CONTROL MODE---------",
   "mouse_control": {
     "enabled": true,
@@ -83,10 +75,9 @@
       "width": 0.5,
       "height": 0.5
     },
-    "left_click_binding": "NON_DOMINANT-PINCH_TAP",
+    "left_click_binding": "NON_DOMINANT-PINCH",
     "right_click_binding": "NON_DOMINANT-OPEN_PALM"
   },
-
   "__comment_controls": "--------HIGH-LEVEL CONTROL GESTURES (SEQUENCE / CONFIRM / UNDO / COMMIT)---------",
   "controls": {
     "sequence": {
@@ -109,7 +100,6 @@
       }
     }
   },
-
   "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",
   "command_mappings": {
     "functional": {
