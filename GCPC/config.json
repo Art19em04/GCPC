@@ -23,11 +23,12 @@
     "support": "LEFT"
   },
   "__comment_gesture_engine": "--------LOW-LEVEL GESTURE ENGINE---------",
-  "gesture_engine": {
-    "clutch": "none",
-    "cooldown_ms": 420,
-    "pinch_threshold": 0.051455004647776054,
-    "fist_threshold": 0.6986375075570722,
+    "gesture_engine": {
+      "clutch": "none",
+      "cooldown_ms": 420,
+      "pinch_to_hold_delay_ms": 250,
+      "pinch_threshold": 0.051455004647776054,
+      "fist_threshold": 0.6986375075570722,
     "thumbs_up_thumb_max_flex": 0.2664826115396578,
     "thumbs_up_others_min_flex": 0.5934635993628441,
     "open_palm_max_flex": 0.1,

@@ -59,6 +59,7 @@ class GestureState:
         self.last_emit_per = {}
         self.wrist_hist = deque(maxlen=20)
         self.prev_pinch = False
+        self.last_pinch_tap = 0.0
         self.hold_latched = False
         self.pose_flags = {}
 
@@ -105,10 +106,16 @@ class GestureState:
         clutch = self.cfg.get("clutch", "none")
         ready = True if clutch == "none" else pinch
         emit = None
+        pinch_to_hold_delay = float(self.cfg.get("pinch_to_hold_delay_ms", 250.0))
         if not self.prev_pinch and pinch and ready and self._can_emit("PINCH_TAP", now):
             emit = "PINCH_TAP"
+            self.last_pinch_tap = now
         elif pinch and ready:
-            if not self.hold_latched and self._can_emit("PINCH", now):
+            if (
+                not self.hold_latched
+                and (now - self.last_pinch_tap) >= pinch_to_hold_delay
+                and self._can_emit("PINCH", now)
+            ):
                 emit = "PINCH"
                 self.hold_latched = True
         else:
