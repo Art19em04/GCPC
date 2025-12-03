@@ -79,22 +79,26 @@ class GestureState:
         """Update gesture state from landmarks and return detected gesture name."""
         now = time.time() * 1000.0
         self.wrist_hist.append((now, lm[WRIST]))
-        pinch_d = _dist(lm[THUMB_TIP], lm[INDEX_TIP]);
-        pinch = pinch_d < self.cfg.get("pinch_threshold", 0.045)
         flex = finger_flexion(lm);
         avg_other = (flex["middle"] + flex["ring"] + flex["pinky"]) / 3.0
         tu_thumb = self.cfg.get("thumbs_up_thumb_max_flex", 0.35)
         tu_others = self.cfg.get("thumbs_up_others_min_flex", 0.5)
         fist_thr = self.cfg.get("fist_threshold", 0.35)
         open_max = self.cfg.get("open_palm_max_flex", 0.35)
+        is_fist = (
+            flex["index"] > fist_thr
+            and flex["middle"] > fist_thr
+            and flex["ring"] > fist_thr
+            and flex["pinky"] > fist_thr
+        )
+        pinch_d = _dist(lm[THUMB_TIP], lm[INDEX_TIP]);
+        pinch = (pinch_d < self.cfg.get("pinch_threshold", 0.045)) and not is_fist
         is_open = (
             flex["index"] < open_max
             and flex["middle"] < open_max
             and flex["ring"] < open_max
             and flex["pinky"] < open_max
         )
-        is_fist = (flex["index"] > fist_thr and flex["middle"] > fist_thr and flex["ring"] > fist_thr and flex[
-            "pinky"] > fist_thr)
         is_thumbs_up = (flex["thumb"] < tu_thumb and avg_other > tu_others)
         self.pose_flags = {"OPEN_PALM": bool(is_open), "FIST": bool(is_fist), "THUMBS_UP": bool(is_thumbs_up),
                            "PINCH": bool(pinch)}
