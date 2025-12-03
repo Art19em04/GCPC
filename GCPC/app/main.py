@@ -332,7 +332,7 @@ def main():
     arm_delay_ms = int(seq_cfg.get("arm_delay_ms"))
     refractory_ms = int(seq_cfg.get("refractory_ms"))
     cancel_exit_ms = int(seq_cfg.get("cancel_on_hand_exit_ms"))
-    auto_exit = bool(seq_cfg.get("auto_exit_on_hand_exit"))
+    auto_exit = False
     max_len = int(seq_cfg.get("max_len"))
 
     hands = build_hands(cfg)
@@ -388,7 +388,7 @@ def main():
         int(commit_cfg.get("dwell_ms")),
         int(commit_cfg.get("refractory_ms")),
     )
-    exit_on_commit = bool(commit_cfg.get("exit_on_commit", seq_cfg.get("exit_on_commit", True)))
+    exit_on_commit = False
 
     cmd_map = cfg.get("command_mappings") or {}
 
@@ -396,6 +396,7 @@ def main():
     complex_map_raw = cmd_map.get("complex_gestures") or {}
     functional_raw = cmd_map.get("functional") or {}
     mode_refractory_ms = int(functional_raw.get("refractory_ms", 800))
+    exit_hold_ms = int(functional_raw.get("exit_hold_ms", 500))
     mode_triggers = {}
 
     for raw_key, combo in functional_raw.items():
@@ -580,6 +581,7 @@ def main():
     mode_last_change_ms = 0
 
     both_pose_latched = {}
+    exit_hold_since = None
 
     def _new_calibration_data() -> Dict[str, List[float]]:
         return {
@@ -904,11 +906,7 @@ def main():
                     now_ms - last_seen_R) >= cancel_exit_ms:
                 seq_buffer.clear()
                 seq_pending = None
-                if auto_exit:
-                    switch_mode("idle", now_ms, force_reset=True)
-                else:
-                    seq_active = False
-                print("[SEQ] Авто-отмена: правая рука вне кадра")
+                print("[SEQ] Буфер очищен: правая рука вне кадра")
 
         if left:
             last_seen_L = now_ms
@@ -922,11 +920,7 @@ def main():
                     now_ms - last_seen_L) >= cancel_exit_ms:
                 seq_buffer.clear()
                 seq_pending = None
-                if auto_exit:
-                    switch_mode("idle", now_ms, force_reset=True)
-                else:
-                    seq_active = False
-                print("[SEQ] Авто-отмена: левая рука вне кадра")
+                print("[SEQ] Буфер очищен: левая рука вне кадра")
 
         dom_event = evR if dominant_side == "RIGHT" else evL
         support_event = evR if support_side == "RIGHT" else evL
@@ -965,8 +959,20 @@ def main():
 
         time_since_change = now_ms - mode_last_change_ms
 
+        exit_binding = mode_triggers.get("exit")
+        exit_active = False
+        if exit_binding:
+            exit_active = _binding_active(
+                exit_binding, bool(right), bool(left), evR, evL
+            )
+        if exit_active:
+            exit_hold_since = exit_hold_since or now_ms
+        else:
+            exit_hold_since = None
+        exit_ready = bool(exit_hold_since and (now_ms - exit_hold_since) >= exit_hold_ms)
+
         if not calibration_active:
-            if current_mode != "idle" and _trigger_fired(mode_triggers["exit"]):
+            if current_mode != "idle" and exit_ready:
                 switch_mode("idle", now_ms, force_reset=True)
             elif _trigger_fired(mode_triggers["record"]) and time_since_change >= mode_refractory_ms:
                 if current_mode == "record":
@@ -1150,21 +1156,22 @@ def main():
             commit_active = bool(gR.pose_flags.get(commit_gesture, False) or gL.pose_flags.get(commit_gesture, False))
 
         if seq_active and commit_deb.update(now_ms, commit_active):
-            key_tuple = tuple(seq_buffer)
-            combo = lookup_mapping(seq_map, seq_hand, key_tuple) if key_tuple else None
-            if combo and (now_ms - last_sent_ms) >= refractory_ms:
-                joined = " > ".join(seq_buffer)
-                print(f"[SEQ-COMMIT] {seq_hand} {joined} -> {combo}")
-                _send_hotkey(combo)
-                last_sent_ms = now_ms
+            if not seq_buffer:
+                print("[SEQ-COMMIT] Пустая последовательность, коммит пропущен")
             else:
-                joined = " > ".join(seq_buffer) if seq_buffer else "—"
-                print(f"[SEQ-COMMIT] Нет маппинга для: {seq_hand} {joined}")
+                key_tuple = tuple(seq_buffer)
+                combo = lookup_mapping(seq_map, seq_hand, key_tuple) if key_tuple else None
+                if combo and (now_ms - last_sent_ms) >= refractory_ms:
+                    joined = " > ".join(seq_buffer)
+                    print(f"[SEQ-COMMIT] {seq_hand} {joined} -> {combo}")
+                    _send_hotkey(combo)
+                    last_sent_ms = now_ms
+                else:
+                    joined = " > ".join(seq_buffer) if seq_buffer else "—"
+                    print(f"[SEQ-COMMIT] Нет маппинга для: {seq_hand} {joined}")
             seq_buffer.clear()
             seq_pending = None
             last_evt_ms = now_ms
-            if exit_on_commit:
-                switch_mode("idle", now_ms, force_reset=True)
 
         if calibration_active:
             stage = current_stage

@@ -47,14 +47,14 @@
     "trigger_key": "c"
   },
   "__comment_sequence": "--------SEQUENCE RECORDING ENGINE---------",
-  "sequence": {
-    "arm_delay_ms": 420,
-    "refractory_ms": 1100,
-    "no_repeat_ms": 650,
-    "cancel_on_hand_exit_ms": 900,
-    "auto_exit_on_hand_exit": true,
-    "max_len": 6,
-    "exit_on_commit": true
+    "sequence": {
+        "arm_delay_ms": 420,
+        "refractory_ms": 1100,
+        "no_repeat_ms": 650,
+        "cancel_on_hand_exit_ms": 900,
+        "auto_exit_on_hand_exit": false,
+        "max_len": 6,
+        "exit_on_commit": false
   },
   "__comment_sounds": "--------SOUNDS / FEEDBACK---------",
   "sounds": {
@@ -104,7 +104,7 @@
         "binding": "BOTH-FIST",
         "dwell_ms": 260,
         "refractory_ms": 1200,
-        "exit_on_commit": true
+        "exit_on_commit": false
       }
     }
   },
@@ -117,12 +117,13 @@
     }
   },
   "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",
-  "command_mappings": {
-    "functional": {
-      "refractory_ms": 200,
-      "BOTH-THUMBS_UP": "MODE_ONE_HAND",
-      "BOTH-FIST": "MODE_RECORD",
-      "NON_DOMINANT-THUMBS_UP": "MODE_MOUSE",
+    "command_mappings": {
+        "functional": {
+          "refractory_ms": 200,
+          "exit_hold_ms": 500,
+          "BOTH-THUMBS_UP": "MODE_ONE_HAND",
+          "BOTH-FIST": "MODE_RECORD",
+          "NON_DOMINANT-THUMBS_UP": "MODE_MOUSE",
       "BOTH-OPEN_PALM": "MODE_EXIT"
     },
     "complex_gestures": {
