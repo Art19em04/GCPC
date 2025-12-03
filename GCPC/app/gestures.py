@@ -59,7 +59,9 @@ class GestureState:
         self.last_emit_per = {}
         self.wrist_hist = deque(maxlen=20)
         self.prev_pinch = False
+        self.prev_middle_pinch = False
         self.hold_latched = False
+        self.hold_latched_middle = False
         self.pose_flags = {}
 
     def _can_emit(self, name, now):
@@ -92,7 +94,11 @@ class GestureState:
             and flex["pinky"] > fist_thr
         )
         pinch_d = _dist(lm[THUMB_TIP], lm[INDEX_TIP]);
-        pinch = (pinch_d < self.cfg.get("pinch_threshold", 0.045)) and not is_fist
+        middle_pinch_d = _dist(lm[THUMB_TIP], lm[MIDDLE_TIP]);
+        pinch_thr = self.cfg.get("pinch_threshold", 0.045)
+        middle_pinch_thr = self.cfg.get("middle_pinch_threshold", pinch_thr)
+        pinch = (pinch_d < pinch_thr) and not is_fist
+        middle_pinch = (middle_pinch_d < middle_pinch_thr) and not is_fist
         is_open = (
             flex["index"] < open_max
             and flex["middle"] < open_max
@@ -101,9 +107,10 @@ class GestureState:
         )
         is_thumbs_up = (flex["thumb"] < tu_thumb and avg_other > tu_others)
         self.pose_flags = {"OPEN_PALM": bool(is_open), "FIST": bool(is_fist), "THUMBS_UP": bool(is_thumbs_up),
-                           "PINCH": bool(pinch)}
+                           "PINCH": bool(pinch), "PINCH_MIDDLE": bool(middle_pinch)}
         clutch = self.cfg.get("clutch", "none")
-        ready = True if clutch == "none" else pinch
+        any_pinch = pinch or middle_pinch
+        ready = True if clutch == "none" else any_pinch
         emit = None
         if not self.prev_pinch and pinch and ready and self._can_emit("PINCH_TAP", now):
             emit = "PINCH_TAP"
@@ -113,6 +120,12 @@ class GestureState:
                 self.hold_latched = True
         else:
             self.hold_latched = False
+        if middle_pinch and ready:
+            if not self.hold_latched_middle and self._can_emit("PINCH_MIDDLE", now):
+                emit = emit or "PINCH_MIDDLE"
+                self.hold_latched_middle = True
+        else:
+            self.hold_latched_middle = False
         if is_fist and ready and self._can_emit("FIST", now):
             emit = emit or "FIST"
         if is_thumbs_up and ready and self._can_emit("THUMBS_UP", now):
@@ -155,4 +168,5 @@ class GestureState:
         if emit:
             self._mark_emit(emit, now)
         self.prev_pinch = pinch
+        self.prev_middle_pinch = middle_pinch
         return emit
