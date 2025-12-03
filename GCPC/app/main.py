@@ -154,7 +154,7 @@ def main():
         return max(lo, min(hi, val))
 
     def _active_pose_name(state: GestureState, fallback: str) -> str:
-        for name in ("PINCH", "FIST", "THUMBS_UP", "OPEN_PALM"):
+        for name in ("PINCH", "PINCH_MIDDLE", "FIST", "THUMBS_UP", "OPEN_PALM"):
             if state.pose_flags.get(name):
                 return name
         return fallback or "—"
@@ -200,6 +200,7 @@ def main():
 
     stage_defs = [
         {"name": "PINCH", "hint": "Сомкните большой+указательный"},
+        {"name": "PINCH_MIDDLE", "hint": "Сомкните большой+средний"},
         {"name": "FIST", "hint": "Сожмите кулак"},
         {"name": "THUMBS_UP", "hint": "Большой вверх, остальные согнуты"},
         {"name": "OPEN_PALM", "hint": "Разожмите ладонь и выпрямите пальцы"},
@@ -586,6 +587,7 @@ def main():
     def _new_calibration_data() -> Dict[str, List[float]]:
         return {
             "pinch": [],
+            "pinch_middle": [],
             "fist": [],
             "thumbs_thumb": [],
             "thumbs_others": [],
@@ -631,6 +633,7 @@ def main():
         now_ms = int(time.time() * 1000)
         flex = finger_flexion(lm)
         pinch_d = _dist(lm[THUMB_TIP], lm[INDEX_TIP])
+        middle_pinch_d = _dist(lm[THUMB_TIP], lm[MIDDLE_TIP])
         span = _palm_span(lm)
         avg_other = (flex["middle"] + flex["ring"] + flex["pinky"]) / 3.0
         prev = None
@@ -641,6 +644,9 @@ def main():
         if stage_name == "PINCH":
             if pinch_d / span < 0.8 and flex["index"] > 0.12 and flex["thumb"] > 0.12:
                 calibration_data["pinch"].append(pinch_d)
+        elif stage_name == "PINCH_MIDDLE":
+            if middle_pinch_d / span < 0.8 and flex["middle"] > 0.12 and flex["thumb"] > 0.12:
+                calibration_data["pinch_middle"].append(middle_pinch_d)
         elif stage_name == "FIST":
             avg_fist = (flex["index"] + flex["middle"] + flex["ring"] + flex["pinky"]) / 4.0
             if avg_fist > 0.35:
@@ -709,6 +715,12 @@ def main():
             lambda v: _clamp(v * 1.1, 0.01, 0.2),
             "pinch_threshold",
         )
+        pinch_middle_thr = or_default(
+            calibration_data["pinch_middle"],
+            0.9,
+            lambda v: _clamp(v * 1.1, 0.01, 0.2),
+            "middle_pinch_threshold",
+        )
         fist_thr = or_default(
             calibration_data["fist"],
             0.25,
@@ -753,6 +765,7 @@ def main():
         )
         updates = {
             "pinch_threshold": pinch_thr,
+            "middle_pinch_threshold": pinch_middle_thr,
             "fist_threshold": fist_thr,
             "thumbs_up_thumb_max_flex": thumbs_thumb,
             "thumbs_up_others_min_flex": thumbs_other,
