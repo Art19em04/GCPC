@@ -133,5 +133,23 @@
             "DOMINANT-SWIPE_LEFT": "ALT+SHIFT+TAB",
             "DOMINANT-SWIPE_RIGHT": "ALT+TAB"
         }
+    },
+    "__comment_eval_single": "--------EVAL SINGLE GESTURE MODE---------",
+    "eval_single": {
+        "gestures": [
+            "PINCH",
+            "PINCH_MIDDLE",
+            "FIST",
+            "THUMBS_UP",
+            "OPEN_PALM",
+            "SWIPE_RIGHT",
+            "SWIPE_LEFT"
+        ],
+        "hand": "dominant",
+        "condition": "ideal",
+        "reps": 30,
+        "timeout_ms": 2500,
+        "pass_accuracy": 0.9,
+        "pass_wrong_max": 3
     }
 }
