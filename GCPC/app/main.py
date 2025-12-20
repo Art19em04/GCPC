@@ -2,6 +2,7 @@ import csv
 import statistics
 import time
 import uuid
+from datetime import datetime
 from typing import Dict, List
 
 import cv2
@@ -50,6 +51,21 @@ METRIC_FIELDS = [
     "false_activations",
 ]
 
+EVAL_FIELDS = [
+    "session_id",
+    "datetime",
+    "condition",
+    "hand",
+    "gesture_target",
+    "reps",
+    "hits",
+    "wrongs",
+    "misses",
+    "accuracy",
+    "false_rate",
+    "avg_time_to_hit_ms",
+]
+
 
 def _append_metrics_row(row):
     """Persist a single metrics row to ``metrics.csv`` with a shared header."""
@@ -63,6 +79,27 @@ def _append_metrics_row(row):
         writer.writerow({key: row.get(key, "") for key in METRIC_FIELDS})
 
 
+def _append_eval_row(row):
+    """Persist a single eval row to ``gesture_eval.csv`` with a shared header."""
+    path = APP_DIR.parent / "gesture_eval.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    exists = path.exists()
+    with path.open("a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=EVAL_FIELDS)
+        if not exists:
+            writer.writeheader()
+        writer.writerow({key: row.get(key, "") for key in EVAL_FIELDS})
+
+
+def _write_eval_report(session_id: str, report_text: str) -> str:
+    """Write evaluation report to a text file and return its path."""
+    path = APP_DIR.parent / f"gesture_eval_report_{session_id}.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        f.write(report_text)
+    return str(path)
+
+
 class ControlPanel(QtWidgets.QWidget):
     """Tiny always-on-top widget for interaction mode and armed toggles."""
 
@@ -71,6 +108,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.setWindowTitle("GCPC Controls")
         self.interaction_mode = "gestures"
         self.armed = True
+        self.eval_single_active = False
 
         layout = QtWidgets.QVBoxLayout(self)
         self.interaction_btn = QtWidgets.QPushButton(self._interaction_label())
@@ -79,9 +117,14 @@ class ControlPanel(QtWidgets.QWidget):
         self.armed_btn.setCheckable(True)
         self.armed_btn.setChecked(True)
         self.armed_btn.clicked.connect(self._toggle_armed)
+        self.eval_btn = QtWidgets.QPushButton(self._eval_label())
+        self.eval_btn.setCheckable(True)
+        self.eval_btn.setChecked(False)
+        self.eval_btn.clicked.connect(self._toggle_eval)
 
         layout.addWidget(self.interaction_btn)
         layout.addWidget(self.armed_btn)
+        layout.addWidget(self.eval_btn)
 
     def _interaction_label(self):
         mode = "GESTURES" if self.interaction_mode == "gestures" else "MK"
@@ -98,11 +141,26 @@ class ControlPanel(QtWidgets.QWidget):
         self.armed = self.armed_btn.isChecked()
         self.armed_btn.setText(self._armed_label())
 
+    def _eval_label(self):
+        return "EVAL_SINGLE: ON" if self.eval_single_active else "EVAL_SINGLE: OFF"
+
+    def _toggle_eval(self):
+        self.eval_single_active = self.eval_btn.isChecked()
+        self.eval_btn.setText(self._eval_label())
+
     def current_interaction(self) -> str:
         return self.interaction_mode
 
     def is_armed(self) -> bool:
         return self.armed
+
+    def is_eval_single(self) -> bool:
+        return self.eval_single_active
+
+    def set_eval_single(self, active: bool) -> None:
+        self.eval_single_active = active
+        self.eval_btn.setChecked(active)
+        self.eval_btn.setText(self._eval_label())
 
 
 def main():
@@ -138,6 +196,17 @@ def main():
         return panel.is_armed() if panel else True
 
     scenario_interaction = _interaction_mode()
+    eval_active = False
+    eval_session_id = session_id
+    eval_gesture_idx = 0
+    eval_rep = 1
+    eval_hits = 0
+    eval_wrongs = 0
+    eval_misses = 0
+    eval_trial_start_ms = 0
+    eval_hit_times: List[int] = []
+    eval_summary_rows: List[Dict[str, str | float]] = []
+    eval_aborted = False
 
     def _dist(a, b):
         dx, dy = a[0] - b[0], a[1] - b[1]
@@ -213,6 +282,27 @@ def main():
         for i in range(len(stage_defs))
     ]
     calibration_total_ms = sum(stage["dur_ms"] for stage in calibration_stages)
+
+    eval_cfg = cfg.get("eval_single", {})
+    eval_gestures = eval_cfg.get(
+        "gestures",
+        [
+            "PINCH",
+            "PINCH_MIDDLE",
+            "FIST",
+            "THUMBS_UP",
+            "OPEN_PALM",
+            "SWIPE_RIGHT",
+            "SWIPE_LEFT",
+        ],
+    )
+    eval_gestures = [str(g).upper() for g in eval_gestures]
+    eval_reps_target = int(eval_cfg.get("reps", 30))
+    eval_timeout_ms = int(eval_cfg.get("timeout_ms", 2500))
+    eval_hand_setting = resolve_side(eval_cfg.get("hand", "dominant"), build_hands(cfg))
+    eval_condition = str(eval_cfg.get("condition", "ideal"))
+    eval_pass_accuracy = float(eval_cfg.get("pass_accuracy", 0.9))
+    eval_pass_wrong_max = int(eval_cfg.get("pass_wrong_max", 3))
 
     cap = open_camera(idx, w, h)
 
@@ -309,6 +399,8 @@ def main():
 
     def _send_hotkey(combo: str):
         nonlocal false_activations_total
+        if eval_active:
+            return
         now_ns = time.perf_counter_ns()
         if last_frame_capture_ns is not None:
             latencies.append((now_ns - last_frame_capture_ns) / 1e6)
@@ -340,6 +432,10 @@ def main():
     dominant_side = hands["dominant"]
     support_side = hands["support"]
     dominant_is_right = dominant_side == "RIGHT"
+
+    if eval_hand_setting not in ("RIGHT", "LEFT"):
+        eval_hand_setting = resolve_side(eval_hand_setting, hands)
+    eval_hand_label = "dominant" if eval_hand_setting == dominant_side else "non_dominant"
 
     controls_cfg = cfg.get("controls", {})
     seq_ctrl = controls_cfg.get("sequence", {})
@@ -583,6 +679,114 @@ def main():
 
     both_pose_latched = {}
     exit_hold_since = None
+
+    def _reset_eval_stats(now_ms: int) -> None:
+        nonlocal eval_rep, eval_hits, eval_wrongs, eval_misses, eval_trial_start_ms, eval_hit_times
+        eval_rep = 1
+        eval_hits = 0
+        eval_wrongs = 0
+        eval_misses = 0
+        eval_trial_start_ms = now_ms
+        eval_hit_times = []
+
+    def _current_eval_target() -> str | None:
+        if 0 <= eval_gesture_idx < len(eval_gestures):
+            return eval_gestures[eval_gesture_idx]
+        return None
+
+    def _finalize_eval_gesture(now_ms: int) -> None:
+        nonlocal eval_summary_rows
+        reps_done = max(0, eval_rep - 1)
+        if reps_done <= 0:
+            accuracy = 0.0
+            false_rate = 0.0
+        else:
+            accuracy = eval_hits / reps_done
+            false_rate = eval_wrongs / reps_done
+        avg_hit_ms = statistics.mean(eval_hit_times) if eval_hit_times else None
+        row = {
+            "session_id": eval_session_id,
+            "datetime": datetime.now().isoformat(timespec="seconds"),
+            "condition": eval_condition,
+            "hand": eval_hand_label,
+            "gesture_target": _current_eval_target() or "",
+            "reps": reps_done,
+            "hits": eval_hits,
+            "wrongs": eval_wrongs,
+            "misses": eval_misses,
+            "accuracy": round(accuracy, 3),
+            "false_rate": round(false_rate, 3),
+            "avg_time_to_hit_ms": round(avg_hit_ms, 3) if avg_hit_ms is not None else "",
+        }
+        _append_eval_row(row)
+        eval_summary_rows.append(row)
+
+    def _finalize_eval_session(now_ms: int) -> None:
+        nonlocal eval_active
+        if not eval_summary_rows:
+            eval_active = False
+            if panel:
+                panel.set_eval_single(False)
+            return
+        total_reps = sum(int(r["reps"]) for r in eval_summary_rows)
+        total_hits = sum(int(r["hits"]) for r in eval_summary_rows)
+        total_wrongs = sum(int(r["wrongs"]) for r in eval_summary_rows)
+        total_misses = sum(int(r["misses"]) for r in eval_summary_rows)
+        accuracy = total_hits / total_reps if total_reps else 0.0
+        false_rate = total_wrongs / total_reps if total_reps else 0.0
+        passed = accuracy >= eval_pass_accuracy and total_wrongs <= eval_pass_wrong_max
+        lines = [
+            "EVAL_SINGLE REPORT",
+            f"session_id: {eval_session_id}",
+            f"datetime: {datetime.now().isoformat(timespec='seconds')}",
+            f"condition: {eval_condition}",
+            f"hand: {eval_hand_label}",
+            f"total_reps: {total_reps}",
+            f"hits: {total_hits}",
+            f"wrongs: {total_wrongs}",
+            f"misses: {total_misses}",
+            f"accuracy: {accuracy:.3f}",
+            f"false_rate: {false_rate:.3f}",
+            f"pass_criteria: accuracy >= {eval_pass_accuracy} and wrongs <= {eval_pass_wrong_max}",
+            f"result: {'PASS' if passed else 'FAIL'}",
+        ]
+        if eval_aborted:
+            lines.append("status: ABORTED")
+        lines.append("")
+        lines.append("Per-gesture summary:")
+        for row in eval_summary_rows:
+            lines.append(
+                f"- {row['gesture_target']}: reps={row['reps']}, hits={row['hits']}, "
+                f"wrongs={row['wrongs']}, misses={row['misses']}, "
+                f"accuracy={row['accuracy']}, false_rate={row['false_rate']}"
+            )
+        report_path = _write_eval_report(eval_session_id, "\n".join(lines))
+        print(f"[EVAL] Report saved to {report_path}")
+        eval_active = False
+        if panel:
+            panel.set_eval_single(False)
+
+    def _start_eval(now_ms: int) -> None:
+        nonlocal eval_active, eval_gesture_idx, eval_summary_rows, eval_aborted, eval_session_id
+        if eval_active or not eval_gestures:
+            return
+        eval_active = True
+        eval_aborted = False
+        eval_gesture_idx = 0
+        eval_summary_rows = []
+        eval_session_id = session_id
+        _reset_eval_stats(now_ms)
+        switch_mode("idle", now_ms, force_reset=True)
+        print("[EVAL] START EVAL_SINGLE")
+
+    def _stop_eval(now_ms: int) -> None:
+        nonlocal eval_active, eval_aborted
+        if not eval_active:
+            return
+        eval_aborted = True
+        _finalize_eval_gesture(now_ms)
+        _finalize_eval_session(now_ms)
+        print("[EVAL] STOP EVAL_SINGLE")
 
     def _new_calibration_data() -> Dict[str, List[float]]:
         return {
@@ -938,6 +1142,12 @@ def main():
         dom_event = evR if dominant_side == "RIGHT" else evL
         support_event = evR if support_side == "RIGHT" else evL
 
+        eval_requested = panel.is_eval_single() if panel else False
+        if eval_requested and not eval_active:
+            _start_eval(now_ms)
+        elif not eval_requested and eval_active:
+            _stop_eval(now_ms)
+
         def _trigger_fired(trig):
             """Return True when a mode trigger gesture has just been activated."""
             nonlocal both_pose_latched
@@ -984,7 +1194,7 @@ def main():
             exit_hold_since = None
         exit_ready = bool(exit_hold_since and (now_ms - exit_hold_since) >= exit_hold_ms)
 
-        if not calibration_active:
+        if not calibration_active and not eval_active:
             if current_mode != "idle" and exit_ready:
                 switch_mode("idle", now_ms, force_reset=True)
             elif _trigger_fired(mode_triggers["record"]) and time_since_change >= mode_refractory_ms:
@@ -1005,7 +1215,7 @@ def main():
                 elif current_mode == "idle":
                     switch_mode("one_hand", now_ms)
 
-        if current_mode != "mouse":
+        if current_mode != "mouse" or eval_active:
             mouse_prev = None
             if mouse_left_down:
                 mouse_release("left")
@@ -1014,7 +1224,7 @@ def main():
                 mouse_release("right")
                 mouse_right_down = False
 
-        if one_hand_active and not seq_active and not mouse_active:
+        if one_hand_active and not seq_active and not mouse_active and not eval_active:
             sides = []
             if dispatch_side in ("EITHER", "ANY"):
                 sides = ["RIGHT", "LEFT"]
@@ -1050,7 +1260,7 @@ def main():
                         last_single_action = f"LAST: {side} {event} → {combo}"
                         break
 
-        if mouse_active:
+        if mouse_active and not eval_active:
             pointer_source = right if pointer_side == "RIGHT" else left
             right_present = bool(right)
             left_present = bool(left)
@@ -1110,7 +1320,7 @@ def main():
         seq_last_label = last_R_label if seq_hand == "RIGHT" else last_L_label
         seq_present = bool(right) if seq_hand == "RIGHT" else bool(left)
 
-        if seq_active and seq_present:
+        if seq_active and seq_present and not eval_active:
             candidate = seq_last_label
             if candidate and candidate not in candidate_ignore:
                 prev_candidate = seq_pending
@@ -1129,14 +1339,14 @@ def main():
         else:
             confirm_active = (last_R_label == confirm_gesture) or (last_L_label == confirm_gesture)
 
-        if seq_active and seq_pending and confirm_deb.update(now_ms, confirm_active):
+        if seq_active and seq_pending and confirm_deb.update(now_ms, confirm_active) and not eval_active:
             if len(seq_buffer) < max_len and (now_ms - last_evt_ms) >= arm_delay_ms:
                 seq_buffer.append(seq_pending)
                 print(f"[SEQ] +{seq_pending}  buffer={seq_buffer}")
                 seq_pending = None
                 last_evt_ms = now_ms
 
-        if seq_active:
+        if seq_active and not eval_active:
             def _update_undo_for_side(side_name):
                 """Handle undo gesture sequence for a specific hand side."""
                 state = gR if side_name == "RIGHT" else gL
@@ -1168,7 +1378,7 @@ def main():
         else:
             commit_active = bool(gR.pose_flags.get(commit_gesture, False) or gL.pose_flags.get(commit_gesture, False))
 
-        if seq_active and commit_deb.update(now_ms, commit_active):
+        if seq_active and commit_deb.update(now_ms, commit_active) and not eval_active:
             if not seq_buffer:
                 print("[SEQ-COMMIT] Пустая последовательность, коммит пропущен")
             else:
@@ -1186,7 +1396,37 @@ def main():
             seq_pending = None
             last_evt_ms = now_ms
 
-        if calibration_active:
+        if eval_active:
+            target = _current_eval_target()
+            if target:
+                event = evR if eval_hand_setting == "RIGHT" else evL
+                if event:
+                    if event == target:
+                        eval_hits += 1
+                        eval_hit_times.append(now_ms - eval_trial_start_ms)
+                    else:
+                        eval_wrongs += 1
+                    eval_rep += 1
+                    eval_trial_start_ms = now_ms
+                elif (now_ms - eval_trial_start_ms) >= eval_timeout_ms:
+                    eval_misses += 1
+                    eval_rep += 1
+                    eval_trial_start_ms = now_ms
+
+                if eval_rep > eval_reps_target:
+                    _finalize_eval_gesture(now_ms)
+                    eval_gesture_idx += 1
+                    if eval_gesture_idx >= len(eval_gestures):
+                        _finalize_eval_session(now_ms)
+                    else:
+                        _reset_eval_stats(now_ms)
+
+            top = f"EVAL {target or '—'} {min(eval_rep, eval_reps_target)}/{eval_reps_target}"
+            sub = (
+                f"COND: {eval_condition} | HAND: {eval_hand_label} | "
+                f"H/W/M: {eval_hits}/{eval_wrongs}/{eval_misses}"
+            )
+        elif calibration_active:
             stage = current_stage
             stage_elapsed = now_ms - calibration_stage_ms
             stage_remaining = max(0, (stage["dur_ms"] if stage else 0) - stage_elapsed)
@@ -1230,7 +1470,7 @@ def main():
             draw_landmarks(frame, left["lm"])
             label = _active_pose_name(gL, last_L_label)
             _draw_pose_label(frame, left["lm"], f"L: {label}", (0, 255, 180))
-        if mouse_active:
+        if mouse_active and not eval_active:
             fh, fw = frame.shape[:2]
             tl = (int(mouse_rect["x"] * fw), int(mouse_rect["y"] * fh))
             br = (
