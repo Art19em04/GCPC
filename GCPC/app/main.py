@@ -1571,6 +1571,7 @@ def main():
                 hand_windows_placed = True
         if not hand_windows_enabled or show_full_camera:
             cv2.imshow("GCPC - Camera", frame)
+            cv2.setWindowProperty("GCPC - Camera", cv2.WND_PROP_TOPMOST, 1)
         raw_key = cv2.waitKey(1)
         key = raw_key & 0xFF if raw_key != -1 else -1
         if raw_key == 27 or key == 27:

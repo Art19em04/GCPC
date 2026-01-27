@@ -109,7 +109,7 @@
     "__comment_ui": "--------USER INTERFACE / SHORTCUTS---------",
     "ui": {
         "controls_panel": {
-            "enabled": true,
+            "enabled": false,
             "start_scenario_shortcut": "s",
             "end_scenario_shortcut": "e"
         },
