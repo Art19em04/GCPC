@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Dict, List
 
 import cv2
+import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.gestures import (
@@ -18,7 +19,7 @@ from app.gestures import (
     WRIST,
     finger_flexion, MIDDLE_TIP,
 )
-from app.os_events_win import mouse_move_normalized, mouse_press, mouse_release, press_combo
+from app.os_events_win import mouse_move_normalized, mouse_press, mouse_release, mouse_scroll, press_combo
 from app.osd import OSD
 from app.tracker_mediapipe import MediaPipeHandTracker
 from app.utils.bindings import (
@@ -174,6 +175,12 @@ def main():
     panel_enabled = bool(panel_cfg.get("enabled", True))
     start_scenario_key = str(panel_cfg.get("start_scenario_shortcut", "Alt+S"))
     end_scenario_key = str(panel_cfg.get("end_scenario_shortcut", "Alt+E"))
+    hand_windows_cfg = ui_cfg.get("hand_windows", {})
+    hand_windows_enabled = bool(hand_windows_cfg.get("enabled", False))
+    hand_window_size = int(hand_windows_cfg.get("size", 220))
+    hand_window_padding = float(hand_windows_cfg.get("padding", 0.2))
+    hand_window_margin = int(hand_windows_cfg.get("margin_px", 16))
+    show_full_camera = bool(hand_windows_cfg.get("show_full_camera", True))
 
     panel = ControlPanel() if panel_enabled else None
     if panel:
@@ -247,6 +254,60 @@ def main():
             2,
             cv2.LINE_AA,
         )
+
+    def _hand_crop(frame, lm, padding: float) -> np.ndarray | None:
+        if not lm:
+            return None
+        h, w = frame.shape[:2]
+        xs = [p[0] for p in lm]
+        ys = [p[1] for p in lm]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        pad_x = (max_x - min_x) * padding
+        pad_y = (max_y - min_y) * padding
+        min_x -= pad_x
+        max_x += pad_x
+        min_y -= pad_y
+        max_y += pad_y
+
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        size = max(max_x - min_x, max_y - min_y)
+        min_x = cx - size / 2.0
+        max_x = cx + size / 2.0
+        min_y = cy - size / 2.0
+        max_y = cy + size / 2.0
+
+        min_x = _clamp(min_x, 0.0, 1.0)
+        max_x = _clamp(max_x, 0.0, 1.0)
+        min_y = _clamp(min_y, 0.0, 1.0)
+        max_y = _clamp(max_y, 0.0, 1.0)
+
+        x1 = int(min_x * w)
+        x2 = int(max_x * w)
+        y1 = int(min_y * h)
+        y2 = int(max_y * h)
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return frame[y1:y2, x1:x2].copy()
+
+    def _render_hand_window(title: str, crop, label: str, size: int, color) -> None:
+        if crop is None:
+            tile = np.zeros((size, size, 3), dtype=np.uint8)
+        else:
+            tile = cv2.resize(crop, (size, size), interpolation=cv2.INTER_AREA)
+        cv2.rectangle(tile, (0, 0), (size, 28), (0, 0, 0), -1)
+        cv2.putText(
+            tile,
+            label,
+            (8, 20),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.imshow(title, tile)
 
     vcfg = cfg["video"]
     idx = int(vcfg.get("camera_index", 0))
@@ -635,16 +696,32 @@ def main():
     mouse_right_binding, mouse_right_label = _read_mouse_binding(
         "right_click_binding"
     )
+    scroll_cfg = mouse_cfg.get("scroll", {}) or {}
+    scroll_enabled = bool(scroll_cfg.get("enabled", True))
+    scroll_hand_token = scroll_cfg.get("hand", "RIGHT")
+    scroll_side = resolve_side(scroll_hand_token, hands)
+    if scroll_side not in ("RIGHT", "LEFT"):
+        scroll_side = "RIGHT"
+    scroll_gesture = str(scroll_cfg.get("gesture", "FIST")).upper()
+    scroll_landmark = int(scroll_cfg.get("landmark", WRIST))
+    scroll_speed = float(scroll_cfg.get("speed", 1200.0))
+    scroll_deadzone = float(scroll_cfg.get("deadzone", 0.01))
+    scroll_interval_ms = int(scroll_cfg.get("interval_ms", 30))
+    scroll_label = binding_notation({"hand": scroll_side, "gesture": scroll_gesture}, dominant_side, support_side)
     mouse_active_hint = mouse_cfg.get("active_hint")
     if not mouse_active_hint:
         trig_label = trigger_label(mode_triggers["mouse"], dominant_side, support_side)
         pointer_hint = binding_notation({"hand": pointer_side, "gesture": "PINCH"}, dominant_side, support_side)
         base_hint = f"CURSOR: {pointer_hint} | LMB: {mouse_left_label} | RMB: {mouse_right_label}"
+        if scroll_enabled:
+            base_hint = f"{base_hint} | SCROLL: {scroll_label}"
         mouse_active_hint = f"{trig_label} | {base_hint}" if trig_label else base_hint
 
     mouse_prev = None
     mouse_left_down = False
     mouse_right_down = False
+    scroll_prev_y = None
+    scroll_last_ms = 0
 
     seq_active = False
     seq_buffer = []
@@ -1054,6 +1131,7 @@ def main():
 
     fps = None
     last_frame_time = time.time()
+    hand_windows_placed = False
 
     while True:
         QtWidgets.QApplication.processEvents()
@@ -1315,6 +1393,27 @@ def main():
                 if mouse_right_down:
                     mouse_release("right")
                     mouse_right_down = False
+            scroll_source = right if scroll_side == "RIGHT" else left
+            scroll_state = gR if scroll_side == "RIGHT" else gL
+            scroll_active = bool(
+                scroll_enabled
+                and scroll_source
+                and scroll_state.pose_flags.get(scroll_gesture, False)
+            )
+            if scroll_active:
+                tip = scroll_source["lm"][scroll_landmark]
+                if scroll_prev_y is None:
+                    scroll_prev_y = tip[1]
+                else:
+                    dy = tip[1] - scroll_prev_y
+                    if abs(dy) >= scroll_deadzone and (now_ms - scroll_last_ms) >= scroll_interval_ms:
+                        delta = int(-dy * scroll_speed)
+                        if delta != 0:
+                            mouse_scroll(delta)
+                            scroll_last_ms = now_ms
+                        scroll_prev_y = tip[1]
+            else:
+                scroll_prev_y = None
 
         seq_hand = seq_input_side if seq_input_side in ("RIGHT", "LEFT") else ("RIGHT" if dominant_is_right else "LEFT")
         seq_last_label = last_R_label if seq_hand == "RIGHT" else last_L_label
@@ -1462,14 +1561,19 @@ def main():
                 sub = "BUF: —"
         osd.set_text(top, sub)
 
+        hand_frame = frame.copy() if hand_windows_enabled else frame
+        right_label = "R: —"
         if right:
             draw_landmarks(frame, right["lm"])
             label = _active_pose_name(gR, last_R_label)
-            _draw_pose_label(frame, right["lm"], f"R: {label}", (0, 200, 255))
+            right_label = f"R: {label}"
+            _draw_pose_label(frame, right["lm"], right_label, (0, 200, 255))
+        left_label = "L: —"
         if left:
             draw_landmarks(frame, left["lm"])
             label = _active_pose_name(gL, last_L_label)
-            _draw_pose_label(frame, left["lm"], f"L: {label}", (0, 255, 180))
+            left_label = f"L: {label}"
+            _draw_pose_label(frame, left["lm"], left_label, (0, 255, 180))
         if mouse_active and not eval_active:
             fh, fw = frame.shape[:2]
             tl = (int(mouse_rect["x"] * fw), int(mouse_rect["y"] * fh))
@@ -1489,7 +1593,22 @@ def main():
                 2,
                 cv2.LINE_AA,
             )
-        cv2.imshow("GCPC - Camera", frame)
+        if hand_windows_enabled:
+            right_crop = _hand_crop(hand_frame, right["lm"], hand_window_padding) if right else None
+            left_crop = _hand_crop(hand_frame, left["lm"], hand_window_padding) if left else None
+            _render_hand_window("GCPC - Right Hand", right_crop, right_label, hand_window_size, (0, 200, 255))
+            _render_hand_window("GCPC - Left Hand", left_crop, left_label, hand_window_size, (0, 255, 180))
+            if not hand_windows_placed:
+                cv2.moveWindow("GCPC - Left Hand", hand_window_margin, hand_window_margin)
+                cv2.moveWindow(
+                    "GCPC - Right Hand",
+                    hand_window_margin * 2 + hand_window_size,
+                    hand_window_margin,
+                )
+                hand_windows_placed = True
+        if not hand_windows_enabled or show_full_camera:
+            cv2.imshow("GCPC - Camera", frame)
+            cv2.setWindowProperty("GCPC - Camera", cv2.WND_PROP_TOPMOST, 1)
         raw_key = cv2.waitKey(1)
         key = raw_key & 0xFF if raw_key != -1 else -1
         if raw_key == 27 or key == 27:
