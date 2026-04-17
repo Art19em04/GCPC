@@ -10,7 +10,7 @@ The project uses **Python**, **MediaPipe**, **OpenCV**, and **PySide6** to recog
 
 GCPC is designed as a practical gesture-control utility for Windows. It provides a desktop UI for enabling camera tracking, turning gesture control on or off, configuring gesture bindings, calibrating recognition, and packaging the application into a standalone executable.
 
-At the current stage, the project already includes a working control panel, gesture settings, calibration запуск, logging, critical-error handling, and one-file EXE build support.
+At the current stage, the project already includes a working control panel, gesture settings, calibration, logging, critical-error handling, and one-file EXE build support.
 
 ---
 
