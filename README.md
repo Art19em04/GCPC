@@ -44,21 +44,12 @@ python -m app.main
 powershell -ExecutionPolicy Bypass -File .\build.ps1 -InstallMissingDeps
 ```
 
-Или с явным Python:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\build.ps1 -PythonExe "C:\Users\Artyom\AppData\Local\Programs\Python\Python312\python.exe" -InstallMissingDeps
-```
-
 После сборки:
 
 - `release\GCPC.exe`
 - `release\config.json`
 - `release\logs\gcpc.log`
 - `release\models\hand_landmarker.task`
-
-## Галерея жестов
-
 
 
 ## Галерея жестов
