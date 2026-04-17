@@ -443,9 +443,10 @@ def main():
     handedness_strategy = str(handedness_cfg.get("strategy", "auto")).strip().lower()
     if handedness_strategy not in {"auto", "label", "geometry"}:
         handedness_strategy = "auto"
-    swap_handedness_labels = bool(handedness_cfg.get("swap_labels", False))
+    swap_handedness_labels_cfg = handedness_cfg.get("swap_labels")
+    swap_handedness_labels = False
     prefer_geometry_on_conflict = bool(
-        handedness_cfg.get("prefer_geometry_on_conflict", True)
+        handedness_cfg.get("prefer_geometry_on_conflict", False)
     )
     tracker = MediaPipeHandTracker(
         min_det=dcfg.get("min_detection_confidence"),
@@ -459,9 +460,22 @@ def main():
     camera_error = ""
 
     providers = getattr(tracker, "providers", []) or []
+    using_tasks_backend = any("tasks" in str(p).lower() for p in providers)
+    if swap_handedness_labels_cfg is None:
+        # Tasks backend on mirrored frames commonly needs label swap.
+        swap_handedness_labels = bool(using_tasks_backend and mirror)
+    else:
+        swap_handedness_labels = bool(swap_handedness_labels_cfg)
     backend_kind = "gpu" if any("CUDA" in p.upper() or "GPU" in p.upper() for p in providers) else "cpu"
     providers_str = str(providers)
     print(f"[SESSION] id={session_id} backend={backend_kind} providers={providers}")
+    print(
+        "[HANDEDNESS] "
+        f"backend={'tasks' if using_tasks_backend else 'legacy'} "
+        f"strategy={handedness_strategy} "
+        f"swap_labels={swap_handedness_labels} "
+        f"mirror={mirror}"
+    )
     if measurements_enabled:
         _append_metrics_row(
             {
@@ -521,6 +535,11 @@ def main():
         if handedness_strategy == "geometry":
             return geometry_label
         if handedness_strategy == "label":
+            return reported_label or geometry_label
+
+        if using_tasks_backend:
+            # For tasks backend we primarily trust handedness label (after optional swap),
+            # because thumb/pinky geometry can be unstable on some poses.
             return reported_label or geometry_label
 
         # auto: trust model label when consistent, otherwise use geometry.

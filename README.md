@@ -2,22 +2,13 @@
 
 **GCPC** is a Windows desktop application for controlling a PC with hand gestures through a webcam.
 
-The project uses **Python**, **MediaPipe**, **OpenCV**, and **PySide6** to recognize hand gestures in real time and map them to desktop actions such as hotkeys, gesture sequences, and mouse control.
-
----
-
-## Overview
-
-GCPC is designed as a practical gesture-control utility for Windows. It provides a desktop UI for enabling camera tracking, turning gesture control on or off, configuring gesture bindings, calibrating recognition, and packaging the application into a standalone executable.
-
-At the current stage, the project already includes a working control panel, gesture settings, calibration, logging, critical-error handling, and one-file EXE build support.
+The project uses **Python**, **MediaPipe**, **OpenCV**, and **PySide6** to recognize gestures in real time and map them to desktop actions such as hotkeys, gesture sequences, and mouse control.
 
 ---
 
 ## Features
 
 ### Main control panel
-
 At startup, the application provides a control panel with:
 
 - `Hand control: ON/OFF`
@@ -26,7 +17,6 @@ At startup, the application provides a control panel with:
 - `Gesture settings` button
 
 ### Gesture settings window
-
 The settings window currently supports:
 
 - mapping `gesture -> hotkey`
@@ -38,7 +28,7 @@ The settings window currently supports:
 ### Logging and error handling
 
 - log file: `logs/gcpc.log`
-- user-friendly popup window on critical errors
+- friendly popup window on critical errors
 
 ### Distribution
 
@@ -52,10 +42,10 @@ The settings window currently supports:
 
 ## Tech stack
 
-- **Python**
-- **PySide6**
-- **OpenCV**
-- **MediaPipe**
+- Python
+- PySide6
+- OpenCV
+- MediaPipe
 
 ---
 
@@ -79,14 +69,60 @@ python -m app.main
 
 ---
 
+## Default usage
+
+The application is designed to be used in a simple startup flow:
+
+1. Start the app.
+2. Enable the camera.
+3. Enable hand control.
+4. Make sure your hand is visible in the camera frame.
+5. Open `Gesture settings` to review or change bindings.
+6. Run calibration if gesture recognition feels unstable.
+
+### What is enabled by default
+
+The exact default behavior depends on the current `config.json`, but the general expected flow is:
+
+- the app starts with the control panel available
+- the camera can be enabled manually
+- hand control can be enabled manually
+- gesture bindings can be changed without editing source code
+- calibration can be started from the settings window
+
+### Where the real default bindings are stored
+
+If you want to know the exact out-of-the-box gesture mappings for your build, check:
+
+- `config.json`
+
+That file is the source of truth for actual default commands and bindings.
+
+---
+
+## Supported gestures
+
+GCPC currently includes the following core gestures:
+
+- `OPEN_PALM`
+- `FIST`
+- `PINCH`
+- `PINCH_MIDDLE`
+- `THUMBS_UP`
+- `SWIPE_LEFT`
+- `SWIPE_RIGHT`
+
+These gestures can be used either as standalone actions or as part of a sequence.
+
+---
+
 ## Gesture configuration
 
 GCPC allows you to bind recognized hand gestures to desktop actions.
 
-There are two main binding types.
+There are two main binding types:
 
 ### 1. Single gesture
-
 A single recognized gesture triggers one action.
 
 Examples:
@@ -98,7 +134,6 @@ Examples:
 This mode is faster, but may be more sensitive to accidental activation.
 
 ### 2. Gesture sequence
-
 A sequence requires several gestures in a specific order before an action is triggered.
 
 Examples:
@@ -107,16 +142,15 @@ Examples:
 - `PINCH -> THUMBS_UP` -> `Alt+Tab`
 - `FIST -> OPEN_PALM -> PINCH` -> `Ctrl+Shift+Esc`
 
-This mode is safer for important commands because it reduces false activations.
+This mode is safer for important or global commands because it reduces false activations.
 
 ---
 
-## How to configure commands in settings
+## How to build commands in settings
 
-When creating gesture bindings, it is recommended to follow these rules.
+When creating gesture bindings, it is recommended to follow these rules:
 
 ### Use simple and familiar hotkeys
-
 Prefer standard desktop shortcuts such as:
 
 - `Ctrl+C`
@@ -126,8 +160,7 @@ Prefer standard desktop shortcuts such as:
 - `Win+D`
 - `Ctrl+Shift+Esc`
 
-### Use single gestures for safe actions
-
+### Reserve single gestures for safe actions
 Single gestures are better for actions that are not dangerous if triggered accidentally.
 
 Good examples:
@@ -138,19 +171,17 @@ Good examples:
 - media control
 - simple navigation shortcuts
 
-### Use sequences for sensitive actions
-
+### Reserve sequences for sensitive actions
 Use gesture sequences for commands that should not be triggered by mistake.
 
 Good examples:
 
 - task manager
 - app switching
-- system shortcuts
-- automation shortcuts
+- desktop automation shortcuts
+- multi-key system commands
 
-### Keep mappings intuitive
-
+### Keep mappings easy to remember
 A gesture should feel related to the action whenever possible.
 
 Examples:
@@ -159,45 +190,46 @@ Examples:
 - `FIST` -> escape or cancel
 - `THUMBS_UP` -> confirm or accept
 
-### Avoid very long sequences
-
-Long sequences are harder to perform consistently and reduce usability.
+### Avoid overly long sequences
+Long sequences are harder to perform consistently and may reduce usability.
 
 A practical sequence length is usually:
 
-- **2 gestures** for common protected actions
-- **3 gestures** for rare or system-level actions
+- 2 gestures for common protected actions
+- 3 gestures for rare or system-level actions
 
 > **Note**
->
 > The exact text format for hotkeys depends on the current parser used by the application.
 > In most cases, bindings are expected in a standard hotkey form such as `Ctrl+C`, `Alt+Tab`, or `Win+D`.
 > If your build uses a different syntax, update the examples above to match the actual implementation.
 
 ---
 
-## Recommended binding examples
+## Recommended default mapping strategy
 
-### Basic desktop control
+If you want the project README to explain how the app is typically used out of the box, this is a good default strategy:
 
-- `OPEN_PALM` -> `Win+D`
-- `FIST` -> `Esc`
-- `THUMBS_UP` -> `Enter`
-- `PINCH` -> `Space`
+### Basic actions
 
-### Navigation and multitasking
+- `OPEN_PALM` -> show desktop or neutral action
+- `FIST` -> cancel or escape
+- `THUMBS_UP` -> confirm or enter
+
+### Protected actions
 
 - `PINCH -> THUMBS_UP` -> `Alt+Tab`
-- `OPEN_PALM -> OPEN_PALM` -> `Win+Tab`
-- `FIST -> PINCH` -> `Ctrl+W`
-
-### Productivity shortcuts
-
 - `OPEN_PALM -> PINCH` -> `Ctrl+C`
 - `PINCH -> OPEN_PALM` -> `Ctrl+V`
-- `FIST -> THUMBS_UP` -> `Ctrl+Z`
 
-These are only examples. The best mapping depends on your use case and how stable each gesture is in your environment.
+### Why this works
+
+- easy gestures get easy actions
+- risky commands are protected by sequences
+- bindings stay memorable
+- accidental triggers are reduced
+
+> **Important**
+> If your application already ships with real predefined bindings, replace this section with the exact values from `config.json`.
 
 ---
 
@@ -209,12 +241,12 @@ Calibration can be started from the settings window using:
 
 Calibration helps the application adapt gesture recognition to the current user, camera position, and lighting conditions.
 
-Recalibration is recommended when:
+Recommended cases for recalibration:
 
-- launching the app for the first time
-- the camera angle has changed
-- lighting conditions have changed
-- gesture recognition became unstable
+- first launch
+- camera angle changed
+- lighting changed
+- recognition quality became unstable
 
 ---
 
@@ -321,10 +353,10 @@ Some gestures and runtime improvements are still in progress.
 
 ---
 
-## Future improvements
+## Planned improvements
 
-- expanded gesture set
-- improved sequence editor
-- better mouse-control tuning
+- extended gesture set
+- better sequence editor
+- improved mouse-control tuning
 - clearer settings UX
 - more robust runtime diagnostics
