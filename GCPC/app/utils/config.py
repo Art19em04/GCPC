@@ -27,9 +27,13 @@ def build_hands(cfg: Dict[str, Any]) -> Dict[str, str]:
     dominant = hands_cfg.get("dominant")
     if dominant not in {"RIGHT", "LEFT"}:
         raise ValueError("[CFG] INCORRECT DOMINANT HAND")
+
     support = hands_cfg.get("support")
     if support not in {"RIGHT", "LEFT"}:
         raise ValueError("[CFG] INCORRECT SUPPORT HAND")
+    if support == dominant:
+        raise ValueError("[CFG] dominant and support hands must differ")
+
     return {"dominant": dominant, "support": support}
 
 

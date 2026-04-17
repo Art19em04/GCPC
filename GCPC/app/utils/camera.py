@@ -3,38 +3,45 @@
 import cv2
 
 
+_BACKENDS = tuple(
+    dict.fromkeys(
+        api
+        for api in (
+            getattr(cv2, "CAP_MSMF", None),
+            getattr(cv2, "CAP_DSHOW", None),
+            getattr(cv2, "CAP_ANY", None),
+        )
+        if api is not None
+    )
+)
+_PROBE_RANGE = range(0, 6)
+
+
+def _open_with_backend(index: int, api: int, width: int, height: int):
+    """Open camera index with a specific backend and verify first frame read."""
+    cap = cv2.VideoCapture(index, api)
+    if not cap or not cap.isOpened():
+        if cap:
+            cap.release()
+        return None
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    ok, _ = cap.read()
+    if not ok:
+        cap.release()
+        return None
+    return cap
+
+
 def open_camera(idx: int, w: int, h: int):
     """Try to open camera by preferred index with fallbacks across APIs."""
-
-    def try_open(i, api):
-        """Attempt to open a specific camera index using selected backend."""
-        cap = cv2.VideoCapture(i, api)
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-            ok, _ = cap.read()
-            if ok:
+    indices = (-1, *_PROBE_RANGE) if idx == -1 else (idx,)
+    for cam_idx in indices:
+        for api in _BACKENDS:
+            cap = _open_with_backend(cam_idx, api, w, h)
+            if cap is not None:
+                print(f"[videoio] open idx={cam_idx} api={api}")
                 return cap
-            cap.release()
-        raise ValueError("[DEVICE] WRONG DEVICE SETUP")
-
-    def probe():
-        for probe in range(0, 6):
-            for api in (cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY):
-                cap = try_open(probe, api)
-                if cap:
-                    print(f"[videoio] open idx={probe} api={api}")
-                    return cap
-
-    for api in (cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY):
-        cap = try_open(idx, api)
-        if cap:
-            print(f"[videoio] open idx={idx} api={api}")
-            return cap
-
-    if idx == -1:
-        return probe()
-
     return None
 
 

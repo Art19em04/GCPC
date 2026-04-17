@@ -68,28 +68,26 @@ EVAL_FIELDS = [
 ]
 
 
-def _append_metrics_row(row):
-    """Persist a single metrics row to ``metrics.csv`` with a shared header."""
-    path = APP_DIR.parent / "metrics.csv"
+def _append_csv_row(file_name: str, field_names: List[str], row: Dict[str, object]) -> None:
+    """Persist a CSV row ensuring a stable header order."""
+    path = APP_DIR.parent / file_name
     path.parent.mkdir(parents=True, exist_ok=True)
     exists = path.exists()
     with path.open("a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=METRIC_FIELDS)
+        writer = csv.DictWriter(f, fieldnames=field_names)
         if not exists:
             writer.writeheader()
-        writer.writerow({key: row.get(key, "") for key in METRIC_FIELDS})
+        writer.writerow({key: row.get(key, "") for key in field_names})
+
+
+def _append_metrics_row(row):
+    """Persist a single metrics row to ``metrics.csv`` with a shared header."""
+    _append_csv_row("metrics.csv", METRIC_FIELDS, row)
 
 
 def _append_eval_row(row):
     """Persist a single eval row to ``gesture_eval.csv`` with a shared header."""
-    path = APP_DIR.parent / "gesture_eval.csv"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    exists = path.exists()
-    with path.open("a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=EVAL_FIELDS)
-        if not exists:
-            writer.writeheader()
-        writer.writerow({key: row.get(key, "") for key in EVAL_FIELDS})
+    _append_csv_row("gesture_eval.csv", EVAL_FIELDS, row)
 
 
 def _write_eval_report(session_id: str, report_text: str) -> str:
@@ -366,6 +364,8 @@ def main():
     eval_pass_wrong_max = int(eval_cfg.get("pass_wrong_max", 3))
 
     cap = open_camera(idx, w, h)
+    if cap is None:
+        raise RuntimeError(f"[DEVICE] unable to open camera (index={idx})")
 
     dcfg = cfg.get("detector", {})
     tracker = MediaPipeHandTracker(
