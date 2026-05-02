@@ -135,7 +135,7 @@
   "command_mappings": {
     "functional": {
       "refractory_ms": 200,
-      "exit_hold_ms": 500,
+      "exit_hold_ms": 2000,
       "BOTH-PINCH": "MODE_RECORD",
       "NON_DOMINANT-THUMBS_UP": "MODE_MOUSE",
       "NON_DOMINANT-PINCH_MIDDLE": "MODE_ONE_HAND",

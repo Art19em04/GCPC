@@ -582,6 +582,7 @@ def main():
     mode_last_change_ms = 0
     both_pose_latched = {}
     exit_hold_since = None
+    exit_hold_progress = 0.0
 
     def _release_mouse_buttons() -> None:
         nonlocal mouse_left_down, mouse_right_down
@@ -591,6 +592,21 @@ def main():
         if mouse_right_down:
             mouse_release("right")
             mouse_right_down = False
+
+    def _set_exit_progress(progress: float | None) -> None:
+        nonlocal exit_hold_progress
+        if progress is None:
+            exit_hold_progress = 0.0
+            if osd.exit_progress is not None:
+                osd.set_exit_progress(None)
+            return
+        exit_hold_progress = max(0.0, min(1.0, float(progress)))
+        osd.set_exit_progress(exit_hold_progress)
+
+    def _reset_exit_hold() -> None:
+        nonlocal exit_hold_since
+        exit_hold_since = None
+        _set_exit_progress(None)
 
     def switch_mode(new_mode: str, now_ms: int, force_reset: bool = False):
         nonlocal current_mode, seq_active, one_hand_active, mouse_active
@@ -638,6 +654,7 @@ def main():
 
         current_mode = new_mode
         mode_last_change_ms = now_ms
+        _reset_exit_hold()
         labels = {
             "idle": "IDLE",
             "record": "RECORD",
@@ -669,7 +686,7 @@ def main():
         nonlocal scroll_prev_y, scroll_last_ms
         nonlocal seq_buffer, seq_pending, last_seq_event_ms, last_evt_ms, last_sent_ms
         nonlocal undo_open_ts, last_R_label, last_L_label, last_single_action
-        nonlocal both_pose_latched, exit_hold_since
+        nonlocal both_pose_latched
         nonlocal hand_windows_enabled, hand_window_size, hand_window_padding
         nonlocal hand_window_margin, show_full_camera, hand_windows_placed
 
@@ -847,6 +864,7 @@ def main():
         new_show_full_camera = bool(new_hand_windows_cfg.get("show_full_camera", True))
 
         hand_roles_changed = previous_hands != (new_dominant_side, new_support_side)
+        exit_hold_settings_changed = exit_hold_ms != new_exit_hold_ms
         binding_settings_changed = (
             previous_mode_triggers != new_mode_triggers
             or previous_single_map_raw != new_single_map_raw
@@ -963,13 +981,16 @@ def main():
             last_sent_ms = now_ms
             undo_open_ts = {"RIGHT": None, "LEFT": None}
             both_pose_latched.clear()
-            exit_hold_since = None
+            _reset_exit_hold()
             last_R_label = ""
             last_L_label = ""
             last_single_action = ""
             gR.pose_flags.clear()
             gL.pose_flags.clear()
             one_hand_dispatcher.reset(now_ms)
+
+        elif exit_hold_settings_changed:
+            _reset_exit_hold()
 
         if mouse_settings_changed:
             mouse_prev = None
@@ -1276,16 +1297,24 @@ def main():
                 evR,
                 evL,
             )
-        if exit_active:
-            exit_hold_since = exit_hold_since or now_ms
+        exit_progress = 0.0
+        if current_mode != "idle" and exit_active:
+            if exit_hold_since is None:
+                exit_hold_since = now_ms
+            hold_ms = max(1, int(exit_hold_ms))
+            exit_progress = max(
+                0.0,
+                min(1.0, (now_ms - exit_hold_since) / hold_ms),
+            )
+            _set_exit_progress(exit_progress)
         else:
-            exit_hold_since = None
-        exit_ready = bool(exit_hold_since and (now_ms - exit_hold_since) >= exit_hold_ms)
+            _reset_exit_hold()
+        exit_ready = exit_progress >= 1.0
 
-        if not calibration.active and not eval_session.active:
-            if current_mode != "idle" and exit_ready:
-                switch_mode("idle", now_ms, force_reset=True)
-            elif _trigger_fired(mode_triggers.get("record")) and time_since_change >= mode_refractory_ms:
+        if current_mode != "idle" and exit_ready:
+            switch_mode("idle", now_ms, force_reset=True)
+        elif not calibration.active and not eval_session.active:
+            if _trigger_fired(mode_triggers.get("record")) and time_since_change >= mode_refractory_ms:
                 if current_mode == "idle":
                     switch_mode("record", now_ms)
             elif mouse_enabled and _trigger_fired(mode_triggers.get("mouse")) and time_since_change >= mode_refractory_ms:

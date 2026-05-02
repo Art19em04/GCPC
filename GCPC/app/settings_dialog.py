@@ -307,6 +307,7 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         mode_mouse = _get_mode_binding(functional, "MODE_MOUSE", ("NON_DOMINANT", "THUMBS_UP"))
         mode_one_hand = _get_mode_binding(functional, "MODE_ONE_HAND", ("BOTH", "THUMBS_UP"))
         mode_exit = _get_mode_binding(functional, "MODE_EXIT", ("BOTH", "OPEN_PALM"))
+        exit_hold_ms = _coerce_int(functional.get("exit_hold_ms"), 500)
 
         self.record_hand_combo, self.record_gesture_combo = self._add_binding_row(
             form, "Record mode", mode_record[0], mode_record[1]
@@ -320,6 +321,8 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         self.exit_mode_hand_combo, self.exit_mode_gesture_combo = self._add_binding_row(
             form, "Exit mode", mode_exit[0], mode_exit[1]
         )
+        self.exit_hold_ms_spin = self._make_spin(exit_hold_ms, 1, 60000, 50)
+        form.addRow("Exit hold time (ms)", self.exit_hold_ms_spin)
         parent_layout.addWidget(group)
 
     def _build_sequence_group(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
@@ -673,6 +676,7 @@ class GestureSettingsDialog(QtWidgets.QDialog):
 
         functional_cfg.clear()
         functional_cfg.update(keep_values)
+        functional_cfg["exit_hold_ms"] = int(self.exit_hold_ms_spin.value())
         for mode_name, binding in mode_bindings.items():
             functional_cfg[binding] = mode_name
         command_mappings["single_gestures"] = self._read_mapping_table(self.single_map_table)
