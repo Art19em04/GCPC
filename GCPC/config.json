@@ -9,8 +9,8 @@
   "__comment_video": "--------CAMERA SETTINGS---------",
   "video": {
     "camera_index": 0,
-    "width": 1280,
-    "height": 720,
+    "width": 1920,
+    "height": 1080,
     "mirror": true,
     "show_fps": true,
     "last_working_camera_index": 0
@@ -124,11 +124,11 @@
       "end_scenario_shortcut": "e"
     },
     "hand_windows": {
-      "enabled": true,
+      "enabled": false,
       "size": 220,
       "padding": 0.2,
       "margin_px": 16,
-      "show_full_camera": false
+      "show_full_camera": true
     }
   },
   "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",

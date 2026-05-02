@@ -5,6 +5,13 @@ from typing import Any, Dict, Iterable, Tuple
 
 from PySide6 import QtWidgets
 
+from app.utils.camera import (
+    available_camera_indices,
+    camera_device_names,
+    camera_index_options,
+    probe_camera_indices,
+)
+
 
 HAND_OPTIONS = (
     ("DOMINANT", "Dominant"),
@@ -101,6 +108,13 @@ def _coerce_int(value: Any, fallback: int) -> int:
         return int(float(value))
     except (TypeError, ValueError):
         return fallback
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _get_mode_binding(functional_cfg: Dict[str, Any], mode_name: str, fallback: Tuple[str, str]) -> Tuple[str, str]:
@@ -216,6 +230,24 @@ class GestureSettingsDialog(QtWidgets.QDialog):
     def _build_camera_group(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         group = QtWidgets.QGroupBox("Camera", self)
         layout = QtWidgets.QVBoxLayout(group)
+        video_cfg = self.cfg.get("video") or {}
+        self.camera_names = camera_device_names()
+        self.camera_indices = available_camera_indices(self.camera_names)
+        self.last_working_camera_index = _coerce_optional_int(
+            video_cfg.get("last_working_camera_index")
+        )
+        self.camera_source_combo = QtWidgets.QComboBox(self)
+        self.camera_source_combo.setToolTip("Camera source")
+        self._populate_camera_source_combo(
+            _coerce_int(video_cfg.get("camera_index"), 0)
+        )
+        refresh_btn = QtWidgets.QPushButton("Refresh sources", self)
+        refresh_btn.clicked.connect(self._refresh_camera_sources)
+        source_row = QtWidgets.QHBoxLayout()
+        source_row.addWidget(self.camera_source_combo, 1)
+        source_row.addWidget(refresh_btn)
+        layout.addLayout(source_row)
+
         ui_cfg = self.cfg.get("ui") or {}
         hand_windows_cfg = ui_cfg.get("hand_windows") or {}
         hands_only = bool(hand_windows_cfg.get("enabled", False)) and not bool(
@@ -225,6 +257,46 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         self.hands_only_camera_checkbox.setChecked(hands_only)
         layout.addWidget(self.hands_only_camera_checkbox)
         parent_layout.addWidget(group)
+
+    def _camera_source_label(self, index: int) -> str:
+        if index == -1:
+            return "Auto (-1)"
+        name = self.camera_names[index] if 0 <= index < len(self.camera_names) else ""
+        if index in self.camera_indices:
+            suffix = "available"
+        elif index == self.last_working_camera_index:
+            suffix = "last working"
+        else:
+            suffix = "configured"
+        if name:
+            return f"{index}: {name} ({suffix})"
+        return f"OpenCV index {index} ({suffix})"
+
+    def _populate_camera_source_combo(self, selected_index: int) -> None:
+        selected_index = int(selected_index)
+        options = camera_index_options(
+            selected_index,
+            self.camera_indices,
+            self.last_working_camera_index,
+        )
+        self.camera_source_combo.clear()
+        selected_combo_index = 0
+        for combo_index, camera_index in enumerate(options):
+            self.camera_source_combo.addItem(
+                self._camera_source_label(camera_index),
+                camera_index,
+            )
+            if camera_index == selected_index:
+                selected_combo_index = combo_index
+        self.camera_source_combo.setCurrentIndex(selected_combo_index)
+
+    def _refresh_camera_sources(self) -> None:
+        selected_index = _coerce_int(self.camera_source_combo.currentData(), 0)
+        self.camera_names = camera_device_names()
+        self.camera_indices = probe_camera_indices()
+        if not self.camera_indices:
+            self.camera_indices = available_camera_indices(self.camera_names)
+        self._populate_camera_source_combo(selected_index)
 
     def _build_mode_group(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         group = QtWidgets.QGroupBox("Mode switching gestures", self)
@@ -564,6 +636,12 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         hands_cfg = self.cfg.setdefault("hands", {})
         hands_cfg["dominant"] = dominant
         hands_cfg["support"] = support
+
+        video_cfg = self.cfg.setdefault("video", {})
+        video_cfg["camera_index"] = _coerce_int(
+            self.camera_source_combo.currentData(),
+            0,
+        )
 
         command_mappings = self.cfg.setdefault("command_mappings", {})
         functional_cfg = command_mappings.setdefault("functional", {})

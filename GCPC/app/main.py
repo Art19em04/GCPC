@@ -42,7 +42,12 @@ from app.utils.bindings import (
     parse_sequence_binding,
     parse_single_binding,
 )
-from app.utils.camera import draw_landmarks, open_camera
+from app.utils.camera import (
+    available_camera_indices,
+    camera_device_names,
+    draw_landmarks,
+    open_camera,
+)
 from app.utils.config import build_hands, load_config, resolve_side, save_config
 from app.utils.runtime import install_exception_hooks, report_fatal_exception, setup_logging
 from app.utils.triggers import DebouncedTrigger
@@ -89,6 +94,8 @@ def main():
     h = int(vcfg.get("height", 720))
     mirror = bool(vcfg.get("mirror", True))
     show_fps = bool(vcfg.get("show_fps", False))
+    camera_names = camera_device_names()
+    camera_indices = available_camera_indices(camera_names)
 
     hand_windows_cfg = ui_cfg.get("hand_windows", {})
     hand_windows_enabled = bool(hand_windows_cfg.get("enabled", False))
@@ -101,7 +108,11 @@ def main():
         ControlPanel(
             default_camera_enabled=bool(panel_cfg.get("camera_enabled", False)),
             default_hand_enabled=bool(panel_cfg.get("hand_control_enabled", False)),
+            default_camera_index=idx,
             default_resolution=(w, h),
+            available_camera_indices=camera_indices,
+            camera_device_names=camera_names,
+            last_working_camera_index=last_working_camera_idx,
         )
         if panel_enabled
         else None
@@ -113,6 +124,7 @@ def main():
     gesture_eval_requested_from_ui = False
     scenario_eval_requested_from_ui = False
     scenario_eval_dialog: ScenarioEvalDialog | None = None
+    prefer_configured_camera_index = False
 
     def _persist_camera_resolution(width: int, height: int) -> None:
         width = int(width)
@@ -129,6 +141,27 @@ def main():
         save_config(cfg)
         LOGGER.info("Camera resolution saved: %sx%s", width, height)
 
+    def _persist_camera_index(camera_idx: int, prefer_next_open: bool = True) -> bool:
+        nonlocal idx, prefer_configured_camera_index
+        camera_idx = int(camera_idx)
+        video_cfg = cfg.setdefault("video", {})
+        current_idx = _optional_int(video_cfg.get("camera_index"))
+        if current_idx == camera_idx and idx == camera_idx:
+            return False
+        video_cfg["camera_index"] = camera_idx
+        idx = camera_idx
+        prefer_configured_camera_index = bool(prefer_next_open)
+        if panel:
+            panel.set_camera_index(
+                idx,
+                available_camera_indices=camera_indices,
+                camera_device_names=camera_names,
+                last_working_camera_index=last_working_camera_idx,
+            )
+        save_config(cfg)
+        LOGGER.info("Camera index saved: %s", camera_idx)
+        return True
+
     def _persist_last_camera_index(camera_idx: int | None) -> None:
         nonlocal last_working_camera_idx
         if camera_idx is None or camera_idx < 0:
@@ -138,6 +171,13 @@ def main():
         video_cfg = cfg.setdefault("video", {})
         video_cfg["last_working_camera_index"] = camera_idx
         last_working_camera_idx = camera_idx
+        if panel:
+            panel.set_camera_index(
+                idx,
+                available_camera_indices=camera_indices,
+                camera_device_names=camera_names,
+                last_working_camera_index=last_working_camera_idx,
+            )
         save_config(cfg)
         LOGGER.info("Last working camera index saved: %s", camera_idx)
 
@@ -398,6 +438,13 @@ def main():
         _safe_destroy_window("GCPC - Left Hand")
         _safe_destroy_window("GCPC - Right Hand")
 
+    def _handle_camera_index_changed(camera_idx: int) -> None:
+        if _persist_camera_index(camera_idx):
+            _close_camera()
+
+    if panel:
+        panel.camera_index_changed.connect(_handle_camera_index_changed)
+
     gR = GestureState(cfg["gesture_engine"])
     gL = GestureState(cfg["gesture_engine"])
 
@@ -601,6 +648,7 @@ def main():
         print(f"[MODE] -> {labels.get(new_mode, new_mode.upper())}")
 
     def _apply_runtime_settings(now_ms: int) -> list[str]:
+        nonlocal idx, prefer_configured_camera_index
         nonlocal hands, dominant_side, support_side, dominant_is_right, eval_session
         nonlocal arm_delay_ms, refractory_ms, cancel_exit_ms, max_len
         nonlocal seq_input_side, candidate_ignore
@@ -625,6 +673,7 @@ def main():
         nonlocal hand_windows_enabled, hand_window_size, hand_window_padding
         nonlocal hand_window_margin, show_full_camera, hand_windows_placed
 
+        previous_camera_idx = idx
         previous_hands = (dominant_side, support_side)
         previous_mode_triggers = mode_triggers
         previous_single_map_raw = single_map_raw
@@ -785,6 +834,11 @@ def main():
         new_scroll_label = new_mouse_settings.scroll_label
         new_mouse_active_hint = new_mouse_settings.active_hint
 
+        new_video_cfg = cfg.get("video", {}) or {}
+        new_camera_idx = _optional_int(new_video_cfg.get("camera_index"))
+        if new_camera_idx is None:
+            new_camera_idx = previous_camera_idx
+
         new_hand_windows_cfg = (cfg.get("ui", {}) or {}).get("hand_windows", {}) or {}
         new_hand_windows_enabled = bool(new_hand_windows_cfg.get("enabled", False))
         new_hand_window_size = int(new_hand_windows_cfg.get("size", 220))
@@ -830,7 +884,9 @@ def main():
             new_hand_window_margin,
             new_show_full_camera,
         )
+        camera_source_changed = previous_camera_idx != new_camera_idx
 
+        idx = new_camera_idx
         hands = new_hands
         dominant_side = new_dominant_side
         support_side = new_support_side
@@ -935,6 +991,18 @@ def main():
             if hand_windows_enabled and not show_full_camera:
                 _safe_destroy_window("GCPC - Camera")
 
+        if camera_source_changed:
+            prefer_configured_camera_index = True
+            _close_camera()
+            hand_windows_placed = False
+        if panel:
+            panel.set_camera_index(
+                idx,
+                available_camera_indices=camera_indices,
+                camera_device_names=camera_names,
+                last_working_camera_index=last_working_camera_idx,
+            )
+
         return []
 
     fps = None
@@ -958,6 +1026,12 @@ def main():
             scenario_eval_requested_from_ui = False
 
         camera_requested = panel.is_camera_enabled() if panel else True
+        requested_camera_idx = panel.selected_camera_index() if panel else idx
+        if requested_camera_idx != idx:
+            if _persist_camera_index(requested_camera_idx):
+                _close_camera()
+                hand_windows_placed = False
+
         requested_resolution = panel.selected_camera_resolution() if panel else (w, h)
         requested_resolution = (int(requested_resolution[0]), int(requested_resolution[1]))
 
@@ -968,12 +1042,15 @@ def main():
             hand_windows_placed = False
 
         if camera_requested and cap is None:
+            prefer_configured = prefer_configured_camera_index
             cap, opened_camera_idx = open_camera(
                 idx,
                 requested_resolution[0],
                 requested_resolution[1],
                 preferred_idx=last_working_camera_idx,
+                prefer_configured=prefer_configured,
             )
+            prefer_configured_camera_index = False
             if cap is None:
                 camera_error = (
                     f"Unable to open camera index={idx} "
@@ -982,6 +1059,8 @@ def main():
                 osd.set_text("CAMERA ERROR", camera_error)
                 QtCore.QThread.msleep(120)
                 continue
+            if opened_camera_idx is not None and opened_camera_idx != idx:
+                _persist_camera_index(opened_camera_idx, prefer_next_open=False)
             _persist_last_camera_index(opened_camera_idx)
             active_resolution = requested_resolution
             w, h = active_resolution
